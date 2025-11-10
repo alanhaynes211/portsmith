@@ -67,7 +67,7 @@ func (df *DynamicForwarder) setupNetwork() error {
 func (df *DynamicForwarder) Start() error {
 	// Clean up any stale resources from previous runs
 	log.Printf("Cleaning up stale resources from previous runs...")
-	if err := df.netSetup.CleanupAll(); err != nil {
+	if err := df.netSetup.Cleanup(); err != nil {
 		log.Printf("Warning: Initial cleanup failed: %v", err)
 	}
 	log.Printf("Stale resource cleanup complete")

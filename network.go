@@ -99,11 +99,11 @@ func (ns *NetworkSetup) SetupPFRedirect(ip string, fromPort, toPort int) (func()
 	return cleanup, nil
 }
 
-// CleanupAll removes all portsmith resources (bulk cleanup)
-// This is used for:
+// Cleanup removes all portsmith resources via helper commands
+// This performs bulk cleanup and is used for:
 // - Cleaning up stale resources on startup
-// - Emergency cleanup if graceful shutdown fails
-func (ns *NetworkSetup) CleanupAll() error {
+// - Manual cleanup via `just cleanup`
+func (ns *NetworkSetup) Cleanup() error {
 	// Clean up in reverse order: pf redirects, hosts, aliases
 	if err := ns.runHelper("remove-pf-redirects"); err != nil {
 		log.Printf("Warning: Failed to clean up pf redirects: %v", err)
