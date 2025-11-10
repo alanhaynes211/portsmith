@@ -81,6 +81,7 @@ uninstall: uninstall-portsmith uninstall-helper uninstall-config
 cleanup:
     sudo /usr/local/bin/portsmith-helper remove-hosts
     sudo /usr/local/bin/portsmith-helper remove-aliases
+    sudo /usr/local/bin/portsmith-helper remove-pf-redirects
 
 # Remove built binaries
 clean:

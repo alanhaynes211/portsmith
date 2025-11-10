@@ -271,17 +271,190 @@ func removeAliasesDarwin() error {
 	return nil
 }
 
+func addPFRedirect(ip string, fromPort, toPort int) error {
+	if err := validateIP(ip); err != nil {
+		return err
+	}
+
+	if fromPort < 1 || fromPort > 65535 || toPort < 1 || toPort > 65535 {
+		return fmt.Errorf("invalid port range: from=%d to=%d", fromPort, toPort)
+	}
+
+	if runtime.GOOS != "darwin" {
+		return fmt.Errorf("unsupported OS: %s (only macOS is supported)", runtime.GOOS)
+	}
+
+	anchorFile := "/etc/pf.anchors/portsmith"
+
+	// Create the pf redirect rule
+	rule := fmt.Sprintf("rdr pass on lo0 inet proto tcp from any to %s port %d -> %s port %d\n", ip, fromPort, ip, toPort)
+
+	// Read existing rules from anchor file
+	var existingContent string
+	if content, err := os.ReadFile(anchorFile); err == nil {
+		existingContent = string(content)
+	}
+
+	// Check if rule already exists
+	if strings.Contains(existingContent, strings.TrimSpace(rule)) {
+		fmt.Printf("pf redirect already exists: %s:%d -> %s:%d\n", ip, fromPort, ip, toPort)
+		return nil
+	}
+
+	// Append new rule
+	newContent := existingContent + rule
+
+	// Write to anchor file
+	if err := os.WriteFile(anchorFile, []byte(newContent), 0644); err != nil {
+		return fmt.Errorf("failed to write anchor file: %v", err)
+	}
+
+	// Check if anchor is referenced in pf.conf
+	pfConfContent, err := os.ReadFile("/etc/pf.conf")
+	if err != nil {
+		return fmt.Errorf("failed to read /etc/pf.conf: %v", err)
+	}
+
+	needsReload := false
+	if !strings.Contains(string(pfConfContent), "rdr-anchor \"portsmith\"") {
+		// Add anchor reference to pf.conf
+		lines := strings.Split(string(pfConfContent), "\n")
+		var newLines []string
+		anchorAdded := false
+
+		for _, line := range lines {
+			newLines = append(newLines, line)
+			// Add rdr-anchor after the com.apple rdr-anchor
+			if strings.Contains(line, "rdr-anchor \"com.apple/*\"") && !anchorAdded {
+				newLines = append(newLines, "rdr-anchor \"portsmith\"")
+				anchorAdded = true
+			}
+		}
+
+		if !anchorAdded {
+			return fmt.Errorf("could not find appropriate location in /etc/pf.conf to add anchor")
+		}
+
+		newPfConf := strings.Join(newLines, "\n")
+		if err := os.WriteFile("/etc/pf.conf", []byte(newPfConf), 0644); err != nil {
+			return fmt.Errorf("failed to update /etc/pf.conf: %v", err)
+		}
+		needsReload = true
+	}
+
+	// Load the anchor
+	cmd := exec.Command("pfctl", "-a", "portsmith", "-f", anchorFile)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to load pf anchor: %v", err)
+	}
+
+	// If we updated pf.conf, reload it to activate the anchor
+	if needsReload {
+		cmd = exec.Command("pfctl", "-f", "/etc/pf.conf")
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("failed to reload pf.conf: %v", err)
+		}
+	}
+
+	fmt.Printf("Added pf redirect: %s:%d -> %s:%d\n", ip, fromPort, ip, toPort)
+	return nil
+}
+
+func removePFRedirect(ip string, fromPort, toPort int) error {
+	if err := validateIP(ip); err != nil {
+		return err
+	}
+
+	if runtime.GOOS != "darwin" {
+		return fmt.Errorf("unsupported OS: %s (only macOS is supported)", runtime.GOOS)
+	}
+
+	anchorFile := "/etc/pf.anchors/portsmith"
+
+	// Read existing rules
+	content, err := os.ReadFile(anchorFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Printf("No pf redirects to remove for %s:%d\n", ip, fromPort)
+			return nil
+		}
+		return fmt.Errorf("failed to read anchor file: %v", err)
+	}
+
+	// Filter out the rule we want to remove
+	targetRule := fmt.Sprintf("rdr pass on lo0 inet proto tcp from any to %s port %d -> %s port %d", ip, fromPort, ip, toPort)
+	lines := strings.Split(string(content), "\n")
+	var newLines []string
+
+	for _, line := range lines {
+		if !strings.Contains(line, targetRule) && strings.TrimSpace(line) != "" {
+			newLines = append(newLines, line)
+		}
+	}
+
+	// Write back the filtered rules
+	newContent := strings.Join(newLines, "\n")
+	if len(newLines) > 0 {
+		newContent += "\n"
+	}
+
+	if err := os.WriteFile(anchorFile, []byte(newContent), 0644); err != nil {
+		return fmt.Errorf("failed to write anchor file: %v", err)
+	}
+
+	// Reload the anchor
+	cmd := exec.Command("pfctl", "-a", "portsmith", "-f", anchorFile)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to reload pf anchor: %v", err)
+	}
+
+	fmt.Printf("Removed pf redirect: %s:%d -> %s:%d\n", ip, fromPort, ip, toPort)
+	return nil
+}
+
+func removePFRedirects() error {
+	if runtime.GOOS != "darwin" {
+		return fmt.Errorf("unsupported OS: %s (only macOS is supported)", runtime.GOOS)
+	}
+
+	anchorFile := "/etc/pf.anchors/portsmith"
+
+	// Check if file exists
+	if _, err := os.Stat(anchorFile); os.IsNotExist(err) {
+		fmt.Println("No pf redirects to remove")
+		return nil
+	}
+
+	// Clear the anchor file
+	if err := os.WriteFile(anchorFile, []byte{}, 0644); err != nil {
+		return fmt.Errorf("failed to clear anchor file: %v", err)
+	}
+
+	// Flush the anchor
+	cmd := exec.Command("pfctl", "-a", "portsmith", "-F", "nat")
+	if err := cmd.Run(); err != nil {
+		// Not fatal if flush fails when there are no rules
+		fmt.Fprintf(os.Stderr, "Warning: failed to flush pf anchor: %v\n", err)
+	}
+
+	fmt.Println("Removed all portsmith pf redirects")
+	return nil
+}
+
 
 func printUsage() {
 	fmt.Fprintf(os.Stderr, `portsmith-helper - Privileged operations helper for portsmith
 
 Usage:
-  portsmith-helper add-alias <ip>              Add loopback alias
-  portsmith-helper remove-alias <ip>           Remove specific loopback alias
-  portsmith-helper remove-aliases              Remove all 127.0.0.x aliases (except 127.0.0.1)
-  portsmith-helper add-host <ip> <hostname>    Add /etc/hosts entry
-  portsmith-helper remove-host <ip> <hostname> Remove specific /etc/hosts entry
-  portsmith-helper remove-hosts                Remove all portsmith /etc/hosts entries
+  portsmith-helper add-alias <ip>                      Add loopback alias
+  portsmith-helper remove-alias <ip>                   Remove specific loopback alias
+  portsmith-helper remove-aliases                      Remove all 127.0.0.x aliases (except 127.0.0.1)
+  portsmith-helper add-host <ip> <hostname>            Add /etc/hosts entry
+  portsmith-helper remove-host <ip> <hostname>         Remove specific /etc/hosts entry
+  portsmith-helper remove-hosts                        Remove all portsmith /etc/hosts entries
+  portsmith-helper add-pf-redirect <ip> <from> <to>    Add pf port redirect
+  portsmith-helper remove-pf-redirect <ip> <from> <to> Remove specific pf redirect
+  portsmith-helper remove-pf-redirects                 Remove all portsmith pf redirects
 
 All IP addresses must be loopback addresses (127.0.0.0/8 or ::1).
 This program must be run as root.
@@ -333,6 +506,41 @@ func main() {
 
 	case "remove-aliases":
 		err = removeAliases()
+
+	case "add-pf-redirect":
+		if len(os.Args) != 5 {
+			fmt.Fprintf(os.Stderr, "Error: add-pf-redirect requires IP, from-port, and to-port arguments\n")
+			os.Exit(1)
+		}
+		var fromPort, toPort int
+		if _, e := fmt.Sscanf(os.Args[3], "%d", &fromPort); e != nil {
+			fmt.Fprintf(os.Stderr, "Error: invalid from-port: %s\n", os.Args[3])
+			os.Exit(1)
+		}
+		if _, e := fmt.Sscanf(os.Args[4], "%d", &toPort); e != nil {
+			fmt.Fprintf(os.Stderr, "Error: invalid to-port: %s\n", os.Args[4])
+			os.Exit(1)
+		}
+		err = addPFRedirect(os.Args[2], fromPort, toPort)
+
+	case "remove-pf-redirect":
+		if len(os.Args) != 5 {
+			fmt.Fprintf(os.Stderr, "Error: remove-pf-redirect requires IP, from-port, and to-port arguments\n")
+			os.Exit(1)
+		}
+		var fromPort, toPort int
+		if _, e := fmt.Sscanf(os.Args[3], "%d", &fromPort); e != nil {
+			fmt.Fprintf(os.Stderr, "Error: invalid from-port: %s\n", os.Args[3])
+			os.Exit(1)
+		}
+		if _, e := fmt.Sscanf(os.Args[4], "%d", &toPort); e != nil {
+			fmt.Fprintf(os.Stderr, "Error: invalid to-port: %s\n", os.Args[4])
+			os.Exit(1)
+		}
+		err = removePFRedirect(os.Args[2], fromPort, toPort)
+
+	case "remove-pf-redirects":
+		err = removePFRedirects()
 
 	default:
 		fmt.Fprintf(os.Stderr, "Error: unknown command: %s\n", command)

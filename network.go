@@ -79,6 +79,47 @@ func (ns *NetworkSetup) AddHostsEntries(ip string, hostnames []string) (func() e
 	return cleanup, nil
 }
 
+// SetupPFRedirect creates a pf redirect for privileged ports
+func (ns *NetworkSetup) SetupPFRedirect(ip string, fromPort, toPort int) (func() error, error) {
+	if err := ns.runHelper("add-pf-redirect", ip, fmt.Sprintf("%d", fromPort), fmt.Sprintf("%d", toPort)); err != nil {
+		return nil, fmt.Errorf("failed to add pf redirect %s:%d -> %s:%d: %w", ip, fromPort, ip, toPort, err)
+	}
+
+	log.Printf("Created pf redirect: %s:%d -> %s:%d", ip, fromPort, ip, toPort)
+
+	// Return cleanup function
+	cleanup := func() error {
+		if err := ns.runHelper("remove-pf-redirect", ip, fmt.Sprintf("%d", fromPort), fmt.Sprintf("%d", toPort)); err != nil {
+			return fmt.Errorf("failed to remove pf redirect %s:%d -> %s:%d: %w", ip, fromPort, ip, toPort, err)
+		}
+		log.Printf("Removed pf redirect: %s:%d -> %s:%d", ip, fromPort, ip, toPort)
+		return nil
+	}
+
+	return cleanup, nil
+}
+
+// CleanupAll removes all portsmith resources (bulk cleanup)
+// This is used for:
+// - Cleaning up stale resources on startup
+// - Emergency cleanup if graceful shutdown fails
+func (ns *NetworkSetup) CleanupAll() error {
+	// Clean up in reverse order: pf redirects, hosts, aliases
+	if err := ns.runHelper("remove-pf-redirects"); err != nil {
+		log.Printf("Warning: Failed to clean up pf redirects: %v", err)
+	}
+
+	if err := ns.runHelper("remove-hosts"); err != nil {
+		log.Printf("Warning: Failed to clean up hosts entries: %v", err)
+	}
+
+	if err := ns.runHelper("remove-aliases"); err != nil {
+		log.Printf("Warning: Failed to clean up loopback aliases: %v", err)
+	}
+
+	return nil
+}
+
 // SetupNetwork configures all network settings for the given host configs
 func (ns *NetworkSetup) SetupNetwork(configs []HostConfig) ([]func() error, error) {
 	cleanup := make([]func() error, 0)

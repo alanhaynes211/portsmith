@@ -34,7 +34,8 @@ type Config struct {
 type ForwardConfig struct {
 	LocalIP    string
 	RemoteHost string
-	Port       int
+	Port       int // Port to forward to on remote host
+	ListenPort int // Port to listen on locally (may differ if using pf redirect)
 	JumpHost   string
 	JumpPort   int
 	KeyPath    string
@@ -42,14 +43,26 @@ type ForwardConfig struct {
 
 // NewForwardConfig creates a ForwardConfig from a HostConfig and port
 func NewForwardConfig(host HostConfig, port int) ForwardConfig {
+	listenPort := port
+	// If port is privileged, use a high port and we'll set up pf redirect
+	if port < 1024 {
+		listenPort = 10000 + port
+	}
+
 	return ForwardConfig{
 		LocalIP:    host.LocalIP,
 		RemoteHost: host.RemoteHost,
 		Port:       port,
+		ListenPort: listenPort,
 		JumpHost:   host.JumpHost,
 		JumpPort:   host.JumpPort,
 		KeyPath:    host.KeyPath,
 	}
+}
+
+// NeedsPFRedirect returns true if this config requires a pf redirect
+func (fc ForwardConfig) NeedsPFRedirect() bool {
+	return fc.Port != fc.ListenPort
 }
 
 // LoadConfig reads and parses a YAML configuration file

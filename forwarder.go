@@ -65,6 +65,13 @@ func (df *DynamicForwarder) setupNetwork() error {
 
 // Start begins the port forwarding
 func (df *DynamicForwarder) Start() error {
+	// Clean up any stale resources from previous runs
+	log.Printf("Cleaning up stale resources from previous runs...")
+	if err := df.netSetup.CleanupAll(); err != nil {
+		log.Printf("Warning: Initial cleanup failed: %v", err)
+	}
+	log.Printf("Stale resource cleanup complete")
+
 	// Setup network interfaces and hosts
 	if err := df.setupNetwork(); err != nil {
 		return err
@@ -91,6 +98,16 @@ func (df *DynamicForwarder) Start() error {
 
 		for _, port := range ports {
 			cfg := NewForwardConfig(config, port)
+
+			// Set up pf redirect if this is a privileged port
+			if cfg.NeedsPFRedirect() {
+				cleanup, err := df.netSetup.SetupPFRedirect(cfg.LocalIP, cfg.Port, cfg.ListenPort)
+				if err != nil {
+					return fmt.Errorf("failed to setup pf redirect for %s:%d: %w", cfg.LocalIP, cfg.Port, err)
+				}
+				df.cleanup = append(df.cleanup, cleanup)
+			}
+
 			go df.connHandle.ListenOnPort(cfg)
 		}
 	}

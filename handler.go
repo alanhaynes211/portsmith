@@ -70,7 +70,7 @@ func (ch *ConnectionHandler) HandleConnection(localConn net.Conn, cfg ForwardCon
 
 // ListenOnPort listens on a specific port and forwards connections
 func (ch *ConnectionHandler) ListenOnPort(cfg ForwardConfig) {
-	listenAddr := fmt.Sprintf("%s:%d", cfg.LocalIP, cfg.Port)
+	listenAddr := fmt.Sprintf("%s:%d", cfg.LocalIP, cfg.ListenPort)
 	listener, err := net.Listen("tcp", listenAddr)
 	if err != nil {
 		log.Printf("Error: Failed to listen on %s: %v", listenAddr, err)
@@ -78,7 +78,11 @@ func (ch *ConnectionHandler) ListenOnPort(cfg ForwardConfig) {
 	}
 	defer listener.Close()
 
-	log.Printf("Listening on %s", listenAddr)
+	if cfg.NeedsPFRedirect() {
+		log.Printf("Listening on %s (redirected from %s:%d)", listenAddr, cfg.LocalIP, cfg.Port)
+	} else {
+		log.Printf("Listening on %s", listenAddr)
+	}
 
 	for {
 		conn, err := listener.Accept()
