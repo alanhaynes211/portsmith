@@ -17,11 +17,12 @@
 ## ✨ Features
 
   * **Dynamic Port Forwarding:** Automatically establishes and maintains SSH port forwards through bastion hosts.
+  * **Privileged Port Support:** Forward privileged ports (like SSH on port 22).
   * **Automatic Loopback Aliases:** Creates local loopback aliases (e.g., `127.0.0.2`, `127.0.0.3`) for clean service separation.
   * **Automatic `/etc/hosts` Management:** Assigns custom hostnames (like `service.remote`) to forwarded services.
   * **Multiple Services:** Define and manage connections for multiple remote services. Forward a single port or entire range.
   * **SSH Agent Integration:** Uses your existing SSH agent for authentication.
-  * **Graceful Cleanup:** Resets `/etc/hosts` and removes loopback aliases on exit.
+  * **Graceful Cleanup:** Automatically cleans up all resources on exit and removes stale resources on startup.
 
 ## 🚀 Getting Started
 
