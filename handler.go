@@ -73,6 +73,7 @@ func (ch *ConnectionHandler) ListenOnPort(cfg ForwardConfig) {
 	listenAddr := fmt.Sprintf("%s:%d", cfg.LocalIP, cfg.Port)
 	listener, err := net.Listen("tcp", listenAddr)
 	if err != nil {
+		log.Printf("Error: Failed to listen on %s: %v", listenAddr, err)
 		return
 	}
 	defer listener.Close()
