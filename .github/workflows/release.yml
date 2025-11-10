@@ -1,0 +1,134 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., v1.0.0)'
+        required: true
+        type: string
+      body:
+        description: 'Release notes (optional, will auto-generate if empty)'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build and Release
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Get version
+        id: version
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            echo "VERSION=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build for macOS amd64
+        env:
+          GOOS: darwin
+          GOARCH: amd64
+        run: |
+          mkdir -p dist/portsmith-${{ steps.version.outputs.VERSION }}-darwin-amd64
+          cd helper && go build -ldflags="-s -w" -o ../dist/portsmith-${{ steps.version.outputs.VERSION }}-darwin-amd64/portsmith-helper
+          cd ..
+          go build -ldflags="-s -w" -o dist/portsmith-${{ steps.version.outputs.VERSION }}-darwin-amd64/portsmith
+          cp config.example.yaml dist/portsmith-${{ steps.version.outputs.VERSION }}-darwin-amd64/
+          cp README.md dist/portsmith-${{ steps.version.outputs.VERSION }}-darwin-amd64/
+          cd dist
+          tar -czf portsmith-${{ steps.version.outputs.VERSION }}-darwin-amd64.tar.gz portsmith-${{ steps.version.outputs.VERSION }}-darwin-amd64
+
+      - name: Build for macOS arm64
+        env:
+          GOOS: darwin
+          GOARCH: arm64
+        run: |
+          mkdir -p dist/portsmith-${{ steps.version.outputs.VERSION }}-darwin-arm64
+          cd helper && go build -ldflags="-s -w" -o ../dist/portsmith-${{ steps.version.outputs.VERSION }}-darwin-arm64/portsmith-helper
+          cd ..
+          go build -ldflags="-s -w" -o dist/portsmith-${{ steps.version.outputs.VERSION }}-darwin-arm64/portsmith
+          cp config.example.yaml dist/portsmith-${{ steps.version.outputs.VERSION }}-darwin-arm64/
+          cp README.md dist/portsmith-${{ steps.version.outputs.VERSION }}-darwin-arm64/
+          cd dist
+          tar -czf portsmith-${{ steps.version.outputs.VERSION }}-darwin-arm64.tar.gz portsmith-${{ steps.version.outputs.VERSION }}-darwin-arm64
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          shasum -a 256 *.tar.gz > checksums.txt
+          cat checksums.txt
+
+      - name: Prepare release notes
+        id: release_notes
+        run: |
+          if [ -n "${{ inputs.body }}" ]; then
+            cat << 'EOF' > release_notes.md
+          ${{ inputs.body }}
+
+          ## Installation
+
+          ```bash
+          curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | bash
+          ```
+
+          Or download the appropriate binary for your platform below.
+
+          ### Platforms
+          - `darwin-amd64`: macOS Intel
+          - `darwin-arm64`: macOS Apple Silicon
+          EOF
+          else
+            cat << 'EOF' > release_notes.md
+          ## Installation
+
+          ```bash
+          curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | bash
+          ```
+
+          Or download the appropriate binary for your platform below.
+
+          ### Platforms
+          - `darwin-amd64`: macOS Intel
+          - `darwin-arm64`: macOS Apple Silicon
+          EOF
+          fi
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Release ${{ steps.version.outputs.VERSION }}
+          tag_name: ${{ steps.version.outputs.VERSION }}
+          draft: false
+          prerelease: false
+          generate_release_notes: ${{ inputs.body == '' }}
+          body_path: release_notes.md
+          files: |
+            dist/*.tar.gz
+            dist/checksums.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: portsmith-${{ steps.version.outputs.VERSION }}
+          path: dist/*.tar.gz

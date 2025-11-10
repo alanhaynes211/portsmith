@@ -1,0 +1,19 @@
+hosts:
+  # Simple example - minimal configuration with defaults
+  - local_ip: 127.0.0.2
+    hostnames:
+      - myapp.local
+    remote_host: app.internal.example.com
+    jump_host: bastion.example.com
+    ports: [80, 443, "5432-5433"]
+
+  # Full example - all options specified
+  - local_ip: 127.0.0.3
+    hostnames:
+      - db.local
+      - database.local                # Multiple hostnames for the same service
+    remote_host: postgres.internal.example.com
+    jump_host: bastion.example.com
+    jump_port: 2222                   # Custom SSH port on jump host
+    key_path: ~/.ssh/work_rsa         # Custom SSH key
+    ports: [80, 443, "5432-5433"]     # Specific ports to forward
