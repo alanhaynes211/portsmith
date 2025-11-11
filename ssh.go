@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
@@ -54,6 +55,42 @@ func (pool *SSHClientPool) LoadAuthMethods(keyPath, identityAgent string) error 
 	return nil
 }
 
+// LoadAuthMethodsWithRetry attempts to load SSH auth methods with unlimited retries
+// This is used when waiting for an SSH agent to become available (e.g., at startup)
+func (pool *SSHClientPool) LoadAuthMethodsWithRetry(keyPath, identityAgent string, retryInterval time.Duration) error {
+	attempt := 0
+
+	for {
+		attempt++
+		err := pool.LoadAuthMethods(keyPath, identityAgent)
+		if err == nil {
+			if attempt > 1 {
+				log.Printf("Successfully loaded SSH auth methods for %s after %d attempts", keyPath, attempt)
+			}
+			return nil
+		}
+
+		// Check if error is agent-related (socket not available yet)
+		errStr := err.Error()
+		isAgentSocketError := strings.Contains(errStr, "connection refused") ||
+			strings.Contains(errStr, "no such file")
+
+		if !isAgentSocketError {
+			// Not an agent availability issue, fail immediately
+			return fmt.Errorf("failed to load SSH auth methods: %w", err)
+		}
+
+		if attempt == 1 {
+			log.Printf("Waiting for SSH agent to become available (will retry every %s)...", retryInterval)
+		} else if attempt%6 == 0 {
+			// Log every 30 seconds (6 attempts * 5s interval)
+			log.Printf("Still waiting for SSH agent... (%d attempts so far)", attempt)
+		}
+
+		time.Sleep(retryInterval)
+	}
+}
+
 // GetClient returns an SSH client for the given jump host, creating one if needed
 func (pool *SSHClientPool) GetClient(jumpHost string, jumpPort int, keyPath, identityAgent string) (*ssh.Client, error) {
 	pool.mu.Lock()
@@ -74,8 +111,32 @@ func (pool *SSHClientPool) GetClient(jumpHost string, jumpPort int, keyPath, ide
 	authMethods, exists := pool.authMethods[cacheKey]
 	pool.authMu.Unlock()
 
+	// Lazy load auth methods if not cached
 	if !exists || len(authMethods) == 0 {
-		return nil, fmt.Errorf("no authentication methods available for key %s", keyPath)
+		log.Printf("Auth methods not loaded for %s, loading now...", keyPath)
+
+		// Unlock the main mutex while we load auth methods to avoid blocking other operations
+		pool.mu.Unlock()
+
+		// Try to load with unlimited retries (5 seconds between attempts)
+		// This will wait indefinitely for the SSH agent to become available
+		err := pool.LoadAuthMethodsWithRetry(keyPath, identityAgent, 5*time.Second)
+
+		// Re-lock before continuing
+		pool.mu.Lock()
+
+		if err != nil {
+			return nil, fmt.Errorf("failed to load SSH auth methods: %w", err)
+		}
+
+		// Retrieve the newly loaded auth methods
+		pool.authMu.Lock()
+		authMethods = pool.authMethods[cacheKey]
+		pool.authMu.Unlock()
+
+		if len(authMethods) == 0 {
+			return nil, fmt.Errorf("no authentication methods available for key %s after loading", keyPath)
+		}
 	}
 
 	// Get current user
@@ -95,9 +156,35 @@ func (pool *SSHClientPool) GetClient(jumpHost string, jumpPort int, keyPath, ide
 	// Build jump host address with port
 	jumpAddr := fmt.Sprintf("%s:%d", jumpHost, jumpPort)
 
-	client, err := ssh.Dial("tcp", jumpAddr, sshConfig)
-	if err != nil {
-		return nil, fmt.Errorf("failed to dial jump host %s: %w", jumpAddr, err)
+	// Retry SSH connection with exponential backoff for agent errors
+	// This handles cases where the agent responds but fails during handshake
+	// (e.g., 1Password waiting for Touch ID unlock, agent initialization)
+	var client *ssh.Client
+	maxRetries := 3
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		client, err = ssh.Dial("tcp", jumpAddr, sshConfig)
+		if err == nil {
+			break
+		}
+
+		// Check if error is agent-related during handshake
+		errStr := err.Error()
+		isAgentError := strings.Contains(errStr, "agent:") ||
+			strings.Contains(errStr, "broken pipe") ||
+			strings.Contains(errStr, "EOF")
+
+		if !isAgentError || attempt == maxRetries {
+			return nil, fmt.Errorf("failed to dial jump host %s (attempt %d/%d): %w", jumpAddr, attempt, maxRetries, err)
+		}
+
+		delay := time.Duration(attempt*3) * time.Second
+		log.Printf("SSH connection failed (attempt %d/%d): %v. Agent may need unlock. Retrying in %s...",
+			attempt, maxRetries, err, delay)
+
+		// Unlock to allow other operations while we wait
+		pool.mu.Unlock()
+		time.Sleep(delay)
+		pool.mu.Lock()
 	}
 
 	pool.clients[clientKey] = client

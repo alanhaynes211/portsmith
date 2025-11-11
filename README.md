@@ -84,7 +84,14 @@ Once configured, run Portsmith and it will appear in your macOS menu bar:
 portsmith
 ```
 
-The terminal will remain open but logs are redirected to `~/Library/Logs/Portsmith/portsmith.log`. The system tray icon provides controls to start/stop forwarding, open the config file, and view logs. Press `Ctrl+C` in the terminal to gracefully shut down all connections and clean up network settings.
+The terminal will remain open but logs are redirected to `~/Library/Logs/Portsmith/portsmith.log`. The system tray icon provides controls to:
+- Start/stop forwarding
+- Open the config file
+- View logs
+- **Enable/disable "Start at Login"** to automatically launch Portsmith when you log in
+- Quit the application
+
+Press `Ctrl+C` in the terminal to gracefully shut down all connections and clean up network settings.
 
 ### SSH Key Management
 

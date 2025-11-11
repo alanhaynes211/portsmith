@@ -27,23 +27,9 @@ func NewDynamicForwarder(configPath string, configs []HostConfig, helperPath str
 
 	sshPool := NewSSHClientPool()
 
-	type authKey struct {
-		keyPath       string
-		identityAgent string
-	}
-	authKeys := make(map[authKey]bool)
-	for _, cfg := range configs {
-		if cfg.KeyPath != "" {
-			authKeys[authKey{cfg.KeyPath, cfg.IdentityAgent}] = true
-		}
-	}
-
-	for key := range authKeys {
-		log.Printf("Loading SSH authentication for %s...", key.keyPath)
-		if err := sshPool.LoadAuthMethods(key.keyPath, key.identityAgent); err != nil {
-			return nil, err
-		}
-	}
+	// Note: We don't load SSH auth methods here anymore (lazy loading).
+	// Auth methods will be loaded on-demand when the first connection is made.
+	// This allows portsmith to start even if SSH agents aren't ready yet.
 
 	return &DynamicForwarder{
 		configPath: configPath,
@@ -64,22 +50,8 @@ func (df *DynamicForwarder) reloadConfig() error {
 
 	df.configs = config.Hosts
 
-	type authKey struct {
-		keyPath       string
-		identityAgent string
-	}
-	authKeys := make(map[authKey]bool)
-	for _, cfg := range df.configs {
-		if cfg.KeyPath != "" {
-			authKeys[authKey{cfg.KeyPath, cfg.IdentityAgent}] = true
-		}
-	}
-
-	for key := range authKeys {
-		if err := df.sshPool.LoadAuthMethods(key.keyPath, key.identityAgent); err != nil {
-			return fmt.Errorf("failed to load SSH auth methods: %w", err)
-		}
-	}
+	// Note: We don't load SSH auth methods here (lazy loading).
+	// Auth methods will be loaded on-demand when connections are made.
 
 	return nil
 }

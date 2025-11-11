@@ -11,12 +11,13 @@ import (
 )
 
 type SystrayApp struct {
-	forwarder *DynamicForwarder
-	mStart    *systray.MenuItem
-	mStop     *systray.MenuItem
-	mStatus   *systray.MenuItem
-	mViewLogs *systray.MenuItem
-	mQuit     *systray.MenuItem
+	forwarder      *DynamicForwarder
+	mStart         *systray.MenuItem
+	mStop          *systray.MenuItem
+	mStatus        *systray.MenuItem
+	mStartAtLogin  *systray.MenuItem
+	mViewLogs      *systray.MenuItem
+	mQuit          *systray.MenuItem
 }
 
 func NewSystrayApp(forwarder *DynamicForwarder) *SystrayApp {
@@ -49,6 +50,15 @@ func (app *SystrayApp) onReady() {
 
 	systray.AddSeparator()
 
+	app.mStartAtLogin = systray.AddMenuItem("Start at Login", "Start Portsmith automatically at login")
+	if isStartAtLoginEnabled() {
+		app.mStartAtLogin.Check()
+	} else {
+		app.mStartAtLogin.Uncheck()
+	}
+
+	systray.AddSeparator()
+
 	app.mQuit = systray.AddMenuItem("Quit", "Quit Portsmith")
 
 	go app.handleMenuEvents(mConfig)
@@ -67,6 +77,8 @@ func (app *SystrayApp) handleMenuEvents(mConfig *systray.MenuItem) {
 			app.handleOpenConfig()
 		case <-app.mViewLogs.ClickedCh:
 			app.handleViewLogs()
+		case <-app.mStartAtLogin.ClickedCh:
+			app.handleToggleStartAtLogin()
 		case <-app.mQuit.ClickedCh:
 			systray.Quit()
 		}
@@ -153,6 +165,107 @@ func openFile(path string) error {
 	}
 
 	return cmd.Start()
+}
+
+func (app *SystrayApp) handleToggleStartAtLogin() {
+	if isStartAtLoginEnabled() {
+		if err := disableStartAtLogin(); err != nil {
+			log.Printf("Failed to disable start at login: %v", err)
+			return
+		}
+		app.mStartAtLogin.Uncheck()
+		log.Println("Start at login disabled")
+	} else {
+		if err := enableStartAtLogin(); err != nil {
+			log.Printf("Failed to enable start at login: %v", err)
+			return
+		}
+		app.mStartAtLogin.Check()
+		log.Println("Start at login enabled")
+	}
+}
+
+func getLaunchAgentPath() string {
+	homeDir, _ := os.UserHomeDir()
+	return filepath.Join(homeDir, "Library", "LaunchAgents", "com.portsmith.portsmith.plist")
+}
+
+func isStartAtLoginEnabled() bool {
+	plistPath := getLaunchAgentPath()
+	_, err := os.Stat(plistPath)
+	return err == nil
+}
+
+func enableStartAtLogin() error {
+	if runtime.GOOS != "darwin" {
+		return nil
+	}
+
+	plistPath := getLaunchAgentPath()
+	launchAgentsDir := filepath.Dir(plistPath)
+
+	// Create LaunchAgents directory if it doesn't exist
+	if err := os.MkdirAll(launchAgentsDir, 0755); err != nil {
+		return err
+	}
+
+	// Get the path to the portsmith binary
+	executable, err := os.Executable()
+	if err != nil {
+		return err
+	}
+
+	// Create plist content
+	plistContent := `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.portsmith.portsmith</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>` + executable + `</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<false/>
+	<key>StandardOutPath</key>
+	<string>/dev/null</string>
+	<key>StandardErrorPath</key>
+	<string>/dev/null</string>
+</dict>
+</plist>
+`
+
+	// Write plist file
+	// Note: We don't call launchctl load here because that would start
+	// portsmith immediately, creating a duplicate instance. The plist will
+	// be automatically loaded on next login.
+	if err := os.WriteFile(plistPath, []byte(plistContent), 0644); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func disableStartAtLogin() error {
+	if runtime.GOOS != "darwin" {
+		return nil
+	}
+
+	plistPath := getLaunchAgentPath()
+
+	// Unload the launch agent
+	cmd := exec.Command("launchctl", "unload", plistPath)
+	_ = cmd.Run() // Ignore errors if not loaded
+
+	// Remove plist file
+	if err := os.Remove(plistPath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+
+	return nil
 }
 
 var iconData = []byte{
