@@ -9,7 +9,8 @@
 <p align="center">
   <a href="#-features">Features</a> •
   <a href="#-getting-started">Getting Started</a> •
-  <a href="#-configuration">Configuration</a>
+  <a href="#-configuration">Configuration</a> •
+  <a href="#-how-it-works">How It Works</a>
 </p>
 
 ## ✨ Features
@@ -62,44 +63,7 @@ just build-install
 
 ### Configure
 
-Portsmith is configured using a YAML file located at `~/.config/portsmith/config.yaml`, which will be created during the installation.
-
-### Run
-
-Once configured, run Portsmith in either system tray mode (default) or CLI mode:
-
-**System Tray Mode (Default)**
-
-Simply run `portsmith` from a terminal and it will appear in your macOS menu bar:
-
-```bash
-# Add your SSH key (if not already loaded)
-ssh-add ~/.ssh/id_rsa
-
-# Run Portsmith (launches in system tray)
-portsmith
-```
-
-The terminal will remain open but logs are redirected to `~/Library/Logs/Portsmith/portsmith.log`. The system tray icon provides controls to start/stop forwarding, open the config file, and view logs.
-
-**CLI Mode**
-
-For traditional terminal operation, use the `--cli` flag:
-
-```bash
-# Run in CLI mode
-portsmith --cli
-```
-
-Portsmith will keep running in the foreground. Press `Ctrl+C` to gracefully shut down all connections and clean up network settings.
-
-## 🔧 Configuration
-
-The core of Portsmith is its configuration file. See the [config.example.yaml](https://github.com/alanhaynes211/portsmith/blob/main/config.example.yaml) for a detailed breakdown of all available options and examples.
-
-A minimal configuration might look like this:
-
-**`~/.config/portsmith/config.yaml`**
+Portsmith is configured using a YAML file located at `~/.config/portsmith/config.yaml`, which will be created during the installation. Below is a minimal example.
 
 ```
 hosts:
@@ -110,6 +74,94 @@ hosts:
     jump_host: bastion.example.com
     ports: [80, 443, "5432-5433"]
 ```
+
+
+### Run
+
+Once configured, run Portsmith and it will appear in your macOS menu bar:
+
+```bash
+# Add your SSH key (if not already loaded)
+ssh-add ~/.ssh/id_rsa
+
+# Run Portsmith (launches in system tray)
+portsmith
+```
+
+The terminal will remain open but logs are redirected to `~/Library/Logs/Portsmith/portsmith.log`. The system tray icon provides controls to start/stop forwarding, open the config file, and view logs. Press `Ctrl+C` in the terminal to gracefully shut down all connections and clean up network settings.
+
+## 🔍 How It Works
+
+### 1. Loopback Interface Aliases
+
+For each configured host, Portsmith creates a loopback interface alias (e.g., `127.0.0.2`, `127.0.0.3`) using the `ifconfig` command. This allows your Mac to have multiple local IP addresses beyond the standard `127.0.0.1`, providing clean separation between different services.
+
+```bash
+# Example: Create alias for 127.0.0.2
+sudo ifconfig lo0 alias 127.0.0.2 up
+```
+
+### 2. `/etc/hosts` Entries
+
+Portsmith adds entries to your `/etc/hosts` file to map friendly hostnames to these loopback aliases.
+
+```bash
+# Example entry added to /etc/hosts
+127.0.0.2 myapp.local # portsmith-dynamic-forward
+```
+
+All entries are marked with `# portsmith-dynamic-forward` for easy identification and cleanup.
+
+### 3. Privileged Port Forwarding with PF
+One of Portsmith's key features is supporting privileged ports (ports < 1024, like SSH on port 22) without requiring Portsmith itself to run as root.
+
+```
+User connects to:  127.0.0.2:22 (privileged)
+       ↓
+PF redirects to:   127.0.0.2:10022 (unprivileged)
+       ↓
+Portsmith listens: 127.0.0.2:10022
+```
+
+The `portsmith-helper` binary (which runs with sudo privileges via the sudoers configuration) manages these PF redirect rules by:
+- Adding redirect rules to `/etc/pf.anchors/portsmith`
+- Configuring the `portsmith` anchor in `/etc/pf.conf`
+- Loading the rules using `pfctl`
+
+### 4. Dynamic SSH Tunneling
+
+When traffic arrives on a forwarded port, Portsmith:
+1. Establishes an SSH connection to the jump host (bastion)
+2. Creates a local port forward from the aliased loopback address to the remote service
+3. Maintains the connection while in use
+4. Tears down the connection when idle
+
+### The `portsmith-helper` Binary
+
+The helper binary performs privileged operations that require root access. It's configured in sudoers to allow passwordless execution of specific commands:
+
+| Command                               | Description                                     | Example                                                  |
+| ------------------------------------- | ----------------------------------------------- | -------------------------------------------------------- |
+| `add-alias <ip>`                      | Add loopback interface alias                    | `portsmith-helper add-alias 127.0.0.2`                   |
+| `remove-alias <ip>`                   | Remove specific loopback alias                  | `portsmith-helper remove-alias 127.0.0.2`                |
+| `remove-aliases`                      | Remove all 127.0.0.x aliases (except 127.0.0.1) | `portsmith-helper remove-aliases`                        |
+| `add-host <ip> <hostname>`            | Add /etc/hosts entry                            | `portsmith-helper add-host 127.0.0.2 myapp.local`        |
+| `remove-host <ip> <hostname>`         | Remove specific /etc/hosts entry                | `portsmith-helper remove-host 127.0.0.2 myapp.local`     |
+| `remove-hosts`                        | Remove all portsmith /etc/hosts entries         | `portsmith-helper remove-hosts`                          |
+| `add-pf-redirect <ip> <from> <to>`    | Add PF port redirect                            | `portsmith-helper add-pf-redirect 127.0.0.2 22 10022`    |
+| `remove-pf-redirect <ip> <from> <to>` | Remove specific PF redirect                     | `portsmith-helper remove-pf-redirect 127.0.0.2 22 10022` |
+| `remove-pf-redirects`                 | Remove all portsmith PF redirects               | `portsmith-helper remove-pf-redirects`                   |
+
+
+### Graceful Cleanup
+
+When Portsmith exits (via `Ctrl+C` or the system tray "Stop" action), it automatically:
+- Closes all SSH connections
+- Removes all loopback aliases it created
+- Removes all /etc/hosts entries
+- Removes all PF redirect rules
+
+On startup, Portsmith also cleans up any stale resources from previous runs that didn't shut down cleanly.
 
 ## ⚖️ License
 
