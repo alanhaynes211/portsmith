@@ -4,10 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
-	"os/signal"
 	"path/filepath"
-	"syscall"
 )
 
 func main() {
@@ -16,37 +13,12 @@ func main() {
 		helperPath = "bin/portsmith-helper"
 	}
 
-	var configPath string
-	cliMode := false
-	daemonMode := false
+	// Setup logging to file before any log statements
+	setupSystrayLogging()
 
-	for i := 1; i < len(os.Args); i++ {
-		arg := os.Args[i]
-		switch arg {
-		case "--cli", "-c":
-			cliMode = true
-		case "--daemon":
-			daemonMode = true
-		default:
-			configPath = arg
-			if !cliMode {
-				cliMode = true
-			}
-		}
-	}
-
-	// Note: Systray mode runs in foreground (no daemonization)
-	// The systray library needs GUI access which doesn't work when daemonized
-	if daemonMode {
-		setupDaemonLogging()
-	}
-
-	if configPath == "" {
-		foundPath, err := FindConfigPath()
-		if err != nil {
-			log.Fatalf("Failed to find config: %v", err)
-		}
-		configPath = foundPath
+	configPath, err := FindConfigPath()
+	if err != nil {
+		log.Fatalf("Failed to find config: %v", err)
 	}
 
 	log.Printf("Loading configuration from: %s", configPath)
@@ -61,72 +33,20 @@ func main() {
 		log.Fatalf("Failed to initialize forwarder: %v", err)
 	}
 
-	if cliMode {
-		runCLIMode(forwarder)
-	} else {
-		runSystrayMode(forwarder)
-	}
-}
-
-// runCLIMode runs portsmith in traditional CLI mode
-func runCLIMode(forwarder *DynamicForwarder) {
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-
-	go func() {
-		<-sigChan
-		log.Println("\nShutting down gracefully...")
-		forwarder.Stop()
-		os.Exit(0)
-	}()
-
-	log.Println("Starting dynamic SSH forwarder (CLI mode)...")
-	if err := forwarder.Start(); err != nil {
-		log.Fatal(err)
-	}
-
-	select {}
+	runSystrayMode(forwarder)
 }
 
 // runSystrayMode runs portsmith with system tray UI
 func runSystrayMode(forwarder *DynamicForwarder) {
 	fmt.Println("Portsmith starting in system tray...")
 	fmt.Println("Logs: ~/Library/Logs/Portsmith/portsmith.log")
-	// Redirect logs to file for cleaner terminal experience
-	setupDaemonLogging()
 	log.Println("Starting Portsmith in systray mode...")
 	app := NewSystrayApp(forwarder)
 	app.Run()
 }
 
-// daemonize forks the process and detaches from terminal
-func daemonize() {
-	executable, err := os.Executable()
-	if err != nil {
-		log.Fatalf("Failed to get executable path: %v", err)
-	}
-
-	args := []string{"--daemon"}
-	args = append(args, os.Args[1:]...)
-
-	cmd := exec.Command(executable, args...)
-	cmd.Stdin = nil
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-
-	if err := cmd.Start(); err != nil {
-		log.Fatalf("Failed to daemonize: %v", err)
-	}
-
-	fmt.Println("Portsmith started in background")
-	fmt.Printf("PID: %d\n", cmd.Process.Pid)
-	fmt.Println("Check logs at: ~/Library/Logs/Portsmith/portsmith.log")
-
-	os.Exit(0)
-}
-
-// setupDaemonLogging redirects logs to a file
-func setupDaemonLogging() {
+// setupSystrayLogging redirects logs to a file
+func setupSystrayLogging() {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		log.Fatalf("Failed to get home directory: %v", err)
