@@ -71,7 +71,7 @@ hosts:
       - myapp.local
     remote_host: app.internal.example.com
     jump_host: bastion.example.com
-    ports: [80, 443, "5432-5433"]
+    ports: [80, "8443-8444"]
 ```
 
 

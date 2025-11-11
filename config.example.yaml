@@ -5,7 +5,7 @@ hosts:
       - myapp.local
     remote_host: app.internal.example.com
     jump_host: bastion.example.com
-    ports: [80, 443, "5432-5433"]
+    ports: [80, 443]
 
   # Full example - all options specified
   - local_ip: 127.0.0.3
@@ -17,4 +17,4 @@ hosts:
     jump_port: 2222
     key_path: ~/.ssh/work_rsa
     identity_agent: ~/Library/Group Containers/foo/t/agent.sock
-    ports: [80, 443, "5432-5433"]
+    ports: ["5432-5433"]
