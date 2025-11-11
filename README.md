@@ -16,12 +16,13 @@
 
 ## ✨ Features
 
-  * **Dynamic Port Forwarding:** Automatically establishes and maintains SSH port forwards through bastion hosts.
-  * **Privileged Port Support:** Forward privileged ports (like SSH on port 22).
+  * **Dynamic Port Forwarding:** Automatically establishes and maintains SSH port forwards through bastion hosts. Connections are established on-demand when traffic is received, minimizing resource usage.
+  * **System Tray Application:** Run as a native macOS system tray app with start/stop controls and easy access to logs and configuration.
+  * **Privileged Port Support:** Forward privileged ports (like SSH on port 22) without running as root.
   * **Automatic Loopback Aliases:** Creates local loopback aliases (e.g., `127.0.0.2`, `127.0.0.3`) for clean service separation.
   * **Automatic `/etc/hosts` Management:** Assigns custom hostnames (like `service.remote`) to forwarded services.
   * **Multiple Services:** Define and manage connections for multiple remote services. Forward a single port or entire range.
-  * **SSH Agent Integration:** Uses your existing SSH agent for authentication.
+  * **SSH Agent Integration:** Uses your existing SSH agent for authentication, with support for custom identity agents (e.g., 1Password).
   * **Graceful Cleanup:** Automatically cleans up all resources on exit and removes stale resources on startup.
 
 ## 🚀 Getting Started
@@ -67,14 +68,29 @@ Portsmith is configured using a YAML file located at `~/.config/portsmith/config
 
 ### Run
 
-Once configured, simply run the `portsmith` command from any terminal. It will read your configuration, establish connections, and set up your local environment.
+Once configured, run Portsmith in either system tray mode (default) or CLI mode:
+
+**System Tray Mode (Default)**
+
+Simply run `portsmith` from a terminal. It will automatically daemonize and appear in your macOS menu bar:
 
 ```bash
 # Add your SSH key (if not already loaded)
 ssh-add ~/.ssh/id_rsa
 
-# Run Portsmith
+# Run Portsmith (launches in system tray)
 portsmith
+```
+
+The system tray icon provides controls to start/stop forwarding, open the config file, and view logs.
+
+**CLI Mode**
+
+For traditional terminal operation, use the `--cli` flag:
+
+```bash
+# Run in CLI mode
+portsmith --cli
 ```
 
 Portsmith will keep running in the foreground. Press `Ctrl+C` to gracefully shut down all connections and clean up network settings.

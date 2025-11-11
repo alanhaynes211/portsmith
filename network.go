@@ -14,7 +14,6 @@ type NetworkSetup struct {
 
 // NewNetworkSetup creates a new network setup manager
 func NewNetworkSetup(helperPath string) (*NetworkSetup, error) {
-	// Verify helper exists and is executable
 	if _, err := os.Stat(helperPath); err != nil {
 		return nil, fmt.Errorf("helper not found at %s: %w", helperPath, err)
 	}
@@ -40,7 +39,6 @@ func (ns *NetworkSetup) SetupLoopbackAlias(ip string) (func() error, error) {
 
 	log.Printf("Created loopback alias %s", ip)
 
-	// Return cleanup function
 	cleanup := func() error {
 		if err := ns.runHelper("remove-alias", ip); err != nil {
 			return fmt.Errorf("failed to remove loopback alias %s: %w", ip, err)
@@ -65,11 +63,10 @@ func (ns *NetworkSetup) AddHostsEntries(ip string, hostnames []string) (func() e
 		log.Printf("Added /etc/hosts entry: %s -> %s", hostname, ip)
 	}
 
-	// Return cleanup function
 	cleanup := func() error {
 		for _, hostname := range hostnames {
 			if err := ns.runHelper("remove-host", ip, hostname); err != nil {
-				log.Printf("Warning: Failed to remove hosts entry %s -> %s: %v", hostname, ip, err)
+				log.Printf("Failed to remove hosts entry %s -> %s: %v", hostname, ip, err)
 			}
 		}
 		log.Printf("Removed /etc/hosts entries for %s", ip)
@@ -87,7 +84,6 @@ func (ns *NetworkSetup) SetupPFRedirect(ip string, fromPort, toPort int) (func()
 
 	log.Printf("Created pf redirect: %s:%d -> %s:%d", ip, fromPort, ip, toPort)
 
-	// Return cleanup function
 	cleanup := func() error {
 		if err := ns.runHelper("remove-pf-redirect", ip, fmt.Sprintf("%d", fromPort), fmt.Sprintf("%d", toPort)); err != nil {
 			return fmt.Errorf("failed to remove pf redirect %s:%d -> %s:%d: %w", ip, fromPort, ip, toPort, err)
@@ -99,22 +95,18 @@ func (ns *NetworkSetup) SetupPFRedirect(ip string, fromPort, toPort int) (func()
 	return cleanup, nil
 }
 
-// Cleanup removes all portsmith resources via helper commands
-// This performs bulk cleanup and is used for:
-// - Cleaning up stale resources on startup
-// - Manual cleanup via `just cleanup`
+// Cleanup removes all portsmith resources (pf redirects, hosts entries, aliases)
 func (ns *NetworkSetup) Cleanup() error {
-	// Clean up in reverse order: pf redirects, hosts, aliases
 	if err := ns.runHelper("remove-pf-redirects"); err != nil {
-		log.Printf("Warning: Failed to clean up pf redirects: %v", err)
+		log.Printf("Failed to clean up pf redirects: %v", err)
 	}
 
 	if err := ns.runHelper("remove-hosts"); err != nil {
-		log.Printf("Warning: Failed to clean up hosts entries: %v", err)
+		log.Printf("Failed to clean up hosts entries: %v", err)
 	}
 
 	if err := ns.runHelper("remove-aliases"); err != nil {
-		log.Printf("Warning: Failed to clean up loopback aliases: %v", err)
+		log.Printf("Failed to clean up loopback aliases: %v", err)
 	}
 
 	return nil
@@ -122,23 +114,21 @@ func (ns *NetworkSetup) Cleanup() error {
 
 // SetupNetwork configures all network settings for the given host configs
 func (ns *NetworkSetup) SetupNetwork(configs []HostConfig) ([]func() error, error) {
-	cleanup := make([]func() error, 0)
+	cleanups := make([]func() error, 0)
 
-	for _, config := range configs {
-		// Setup loopback alias
-		cleanupFn, err := ns.SetupLoopbackAlias(config.LocalIP)
+	for _, cfg := range configs {
+		cleanup, err := ns.SetupLoopbackAlias(cfg.LocalIP)
 		if err != nil {
-			return cleanup, fmt.Errorf("failed to setup loopback for %s: %w", config.LocalIP, err)
+			return cleanups, fmt.Errorf("failed to setup loopback for %s: %w", cfg.LocalIP, err)
 		}
-		cleanup = append(cleanup, cleanupFn)
+		cleanups = append(cleanups, cleanup)
 
-		// Setup hosts entries
-		cleanupFn, err = ns.AddHostsEntries(config.LocalIP, config.Hostnames)
+		cleanup, err = ns.AddHostsEntries(cfg.LocalIP, cfg.Hostnames)
 		if err != nil {
-			return cleanup, fmt.Errorf("failed to setup hosts entries for %s: %w", config.LocalIP, err)
+			return cleanups, fmt.Errorf("failed to setup hosts entries for %s: %w", cfg.LocalIP, err)
 		}
-		cleanup = append(cleanup, cleanupFn)
+		cleanups = append(cleanups, cleanup)
 	}
 
-	return cleanup, nil
+	return cleanups, nil
 }

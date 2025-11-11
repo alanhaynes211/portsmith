@@ -31,40 +31,47 @@ func NewSSHClientPool() *SSHClientPool {
 	}
 }
 
-// LoadAuthMethods loads SSH authentication methods for the given key path
-func (pool *SSHClientPool) LoadAuthMethods(keyPath string) error {
+// LoadAuthMethods loads SSH authentication methods for the given key path and optional identity agent
+func (pool *SSHClientPool) LoadAuthMethods(keyPath, identityAgent string) error {
 	pool.authMu.Lock()
 	defer pool.authMu.Unlock()
 
-	// Check if already loaded
-	if _, exists := pool.authMethods[keyPath]; exists {
+	cacheKey := keyPath
+	if identityAgent != "" {
+		cacheKey = keyPath + "|" + identityAgent
+	}
+
+	if _, exists := pool.authMethods[cacheKey]; exists {
 		return nil
 	}
 
-	authMethods, err := loadSSHAuthMethods(keyPath)
+	authMethods, err := loadSSHAuthMethods(keyPath, identityAgent)
 	if err != nil {
 		return fmt.Errorf("failed to load SSH auth methods: %w", err)
 	}
 
-	pool.authMethods[keyPath] = authMethods
+	pool.authMethods[cacheKey] = authMethods
 	return nil
 }
 
 // GetClient returns an SSH client for the given jump host, creating one if needed
-func (pool *SSHClientPool) GetClient(jumpHost string, jumpPort int, keyPath string) (*ssh.Client, error) {
+func (pool *SSHClientPool) GetClient(jumpHost string, jumpPort int, keyPath, identityAgent string) (*ssh.Client, error) {
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
 
-	// Use jump host + port as key for client cache
 	clientKey := fmt.Sprintf("%s:%d", jumpHost, jumpPort)
 
 	if client, exists := pool.clients[clientKey]; exists {
 		return client, nil
 	}
 
-	// Get cached auth methods
+	cacheKey := keyPath
+	if identityAgent != "" {
+		cacheKey = keyPath + "|" + identityAgent
+	}
+
 	pool.authMu.Lock()
-	authMethods, exists := pool.authMethods[keyPath]
+	authMethods, exists := pool.authMethods[cacheKey]
 	pool.authMu.Unlock()
 
 	if !exists || len(authMethods) == 0 {
@@ -143,23 +150,42 @@ func ExpandKeyPath(keyPath string) (string, error) {
 }
 
 // loadSSHAuthMethods loads SSH authentication methods from agent or key file
-func loadSSHAuthMethods(keyPath string) ([]ssh.AuthMethod, error) {
+func loadSSHAuthMethods(keyPath, identityAgent string) ([]ssh.AuthMethod, error) {
 	authMethods := make([]ssh.AuthMethod, 0)
 
-	// Try SSH agent first
-	if sshAuthSock := os.Getenv("SSH_AUTH_SOCK"); sshAuthSock != "" {
-		agentConn, err := net.Dial("unix", sshAuthSock)
+	// Priority: identity_agent config > SSH_AUTH_SOCK env > key file
+	agentSocket := ""
+	if identityAgent != "" {
+		expandedAgent, err := ExpandKeyPath(identityAgent)
+		if err != nil {
+			log.Printf("Failed to expand identity agent path %s: %v", identityAgent, err)
+		} else {
+			agentSocket = expandedAgent
+			log.Printf("Using configured identity agent: %s", agentSocket)
+		}
+	}
+
+	if agentSocket == "" {
+		if sshAuthSock := os.Getenv("SSH_AUTH_SOCK"); sshAuthSock != "" {
+			agentSocket = sshAuthSock
+			log.Printf("Using SSH_AUTH_SOCK agent")
+		}
+	}
+
+	if agentSocket != "" {
+		agentConn, err := net.Dial("unix", agentSocket)
 		if err == nil {
 			agentClient := agent.NewClient(agentConn)
 			signers, err := agentClient.Signers()
 			if err == nil && len(signers) > 0 {
 				authMethods = append(authMethods, ssh.PublicKeys(signers...))
-				log.Printf("Using SSH agent with %d key(s)", len(signers))
-				// Add keyboard-interactive for 2FA support
+				log.Printf("SSH agent connected with %d key(s)", len(signers))
 				authMethods = append(authMethods, ssh.KeyboardInteractive(keyboardInteractiveChallenge))
 				return authMethods, nil
 			}
 			agentConn.Close()
+		} else {
+			log.Printf("Failed to connect to SSH agent at %s: %v", agentSocket, err)
 		}
 	}
 

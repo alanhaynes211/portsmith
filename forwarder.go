@@ -2,55 +2,86 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log"
+	"net"
 	"strings"
 )
 
 // DynamicForwarder orchestrates the dynamic port forwarding
 type DynamicForwarder struct {
+	configPath string
 	configs    []HostConfig
 	netSetup   *NetworkSetup
 	sshPool    *SSHClientPool
-	connHandle *ConnectionHandler
 	cleanup    []func() error
+	running    bool
 }
 
 // NewDynamicForwarder creates a new dynamic forwarder
-func NewDynamicForwarder(configs []HostConfig, helperPath string) (*DynamicForwarder, error) {
-	// Create network setup
+func NewDynamicForwarder(configPath string, configs []HostConfig, helperPath string) (*DynamicForwarder, error) {
 	netSetup, err := NewNetworkSetup(helperPath)
 	if err != nil {
 		return nil, err
 	}
 
-	// Create SSH client pool
 	sshPool := NewSSHClientPool()
 
-	// Load SSH auth methods upfront for each unique key path
-	keyPaths := make(map[string]bool)
-	for _, config := range configs {
-		if config.KeyPath != "" {
-			keyPaths[config.KeyPath] = true
+	type authKey struct {
+		keyPath       string
+		identityAgent string
+	}
+	authKeys := make(map[authKey]bool)
+	for _, cfg := range configs {
+		if cfg.KeyPath != "" {
+			authKeys[authKey{cfg.KeyPath, cfg.IdentityAgent}] = true
 		}
 	}
 
-	for keyPath := range keyPaths {
-		log.Printf("Loading SSH authentication for %s...", keyPath)
-		if err := sshPool.LoadAuthMethods(keyPath); err != nil {
+	for key := range authKeys {
+		log.Printf("Loading SSH authentication for %s...", key.keyPath)
+		if err := sshPool.LoadAuthMethods(key.keyPath, key.identityAgent); err != nil {
 			return nil, err
 		}
 	}
 
-	// Create connection handler
-	connHandler := NewConnectionHandler(sshPool)
-
 	return &DynamicForwarder{
+		configPath: configPath,
 		configs:    configs,
 		netSetup:   netSetup,
 		sshPool:    sshPool,
-		connHandle: connHandler,
 		cleanup:    make([]func() error, 0),
 	}, nil
+}
+
+// reloadConfig re-reads the configuration file and updates internal state
+func (df *DynamicForwarder) reloadConfig() error {
+	log.Printf("Reloading configuration from: %s", df.configPath)
+	config, err := LoadConfig(df.configPath)
+	if err != nil {
+		return fmt.Errorf("failed to reload config: %w", err)
+	}
+
+	df.configs = config.Hosts
+
+	type authKey struct {
+		keyPath       string
+		identityAgent string
+	}
+	authKeys := make(map[authKey]bool)
+	for _, cfg := range df.configs {
+		if cfg.KeyPath != "" {
+			authKeys[authKey{cfg.KeyPath, cfg.IdentityAgent}] = true
+		}
+	}
+
+	for key := range authKeys {
+		if err := df.sshPool.LoadAuthMethods(key.keyPath, key.identityAgent); err != nil {
+			return fmt.Errorf("failed to load SSH auth methods: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // setupNetwork configures all network settings
@@ -65,61 +96,83 @@ func (df *DynamicForwarder) setupNetwork() error {
 
 // Start begins the port forwarding
 func (df *DynamicForwarder) Start() error {
-	// Clean up any stale resources from previous runs
+	if df.running {
+		return fmt.Errorf("forwarder is already running")
+	}
+
+	if err := df.reloadConfig(); err != nil {
+		return err
+	}
+
 	log.Printf("Cleaning up stale resources from previous runs...")
 	if err := df.netSetup.Cleanup(); err != nil {
-		log.Printf("Warning: Initial cleanup failed: %v", err)
+		log.Printf("Initial cleanup failed: %v", err)
 	}
 	log.Printf("Stale resource cleanup complete")
 
-	// Setup network interfaces and hosts
 	if err := df.setupNetwork(); err != nil {
 		return err
 	}
 
-	for _, config := range df.configs {
-		displayName := config.RemoteHost
-		if len(config.Hostnames) > 0 {
-			displayName = fmt.Sprintf("%s (%s)", strings.Join(config.Hostnames, ", "), config.RemoteHost)
+	for _, cfg := range df.configs {
+		displayName := cfg.RemoteHost
+		if len(cfg.Hostnames) > 0 {
+			displayName = fmt.Sprintf("%s (%s)", strings.Join(cfg.Hostnames, ", "), cfg.RemoteHost)
 		}
 
-		ports, err := ExpandPorts(config)
+		ports, err := ExpandPorts(cfg)
 		if err != nil {
 			return fmt.Errorf("failed to expand ports for %s: %w", displayName, err)
 		}
 
 		if len(ports) == 0 {
-			log.Printf("Warning: %s has no ports configured - skipping", displayName)
+			log.Printf("%s has no ports configured - skipping", displayName)
 			continue
 		}
 
 		log.Printf("Setting up %s -> %s (%d ports)",
-			config.LocalIP, displayName, len(ports))
+			cfg.LocalIP, displayName, len(ports))
 
 		for _, port := range ports {
-			cfg := NewForwardConfig(config, port)
+			fwdCfg := NewForwardConfig(cfg, port)
 
-			// Set up pf redirect if this is a privileged port
-			if cfg.NeedsPFRedirect() {
-				cleanup, err := df.netSetup.SetupPFRedirect(cfg.LocalIP, cfg.Port, cfg.ListenPort)
+			if fwdCfg.NeedsPFRedirect() {
+				cleanup, err := df.netSetup.SetupPFRedirect(fwdCfg.LocalIP, fwdCfg.Port, fwdCfg.ListenPort)
 				if err != nil {
-					return fmt.Errorf("failed to setup pf redirect for %s:%d: %w", cfg.LocalIP, cfg.Port, err)
+					return fmt.Errorf("failed to setup pf redirect for %s:%d: %w", fwdCfg.LocalIP, fwdCfg.Port, err)
 				}
 				df.cleanup = append(df.cleanup, cleanup)
 			}
 
-			go df.connHandle.ListenOnPort(cfg)
+			go df.listenAndForward(fwdCfg)
 		}
 	}
 
-	select {}
+	df.running = true
+	log.Printf("Port forwarding started")
+	return nil
+}
+
+// Stop stops the port forwarding and cleans up
+func (df *DynamicForwarder) Stop() error {
+	if !df.running {
+		return nil
+	}
+
+	log.Printf("Stopping port forwarding...")
+	df.running = false
+	return df.Close()
+}
+
+// IsRunning returns whether the forwarder is currently running
+func (df *DynamicForwarder) IsRunning() bool {
+	return df.running
 }
 
 // Close shuts down the forwarder and cleans up resources
 func (df *DynamicForwarder) Close() error {
 	df.sshPool.Close()
 
-	// Run cleanup functions in reverse order
 	for i := len(df.cleanup) - 1; i >= 0; i-- {
 		if err := df.cleanup[i](); err != nil {
 			log.Printf("Cleanup error: %v", err)
@@ -127,4 +180,79 @@ func (df *DynamicForwarder) Close() error {
 	}
 
 	return nil
+}
+
+// listenAndForward listens on a port and forwards connections
+func (df *DynamicForwarder) listenAndForward(cfg ForwardConfig) {
+	listenAddr := fmt.Sprintf("%s:%d", cfg.LocalIP, cfg.ListenPort)
+	listener, err := net.Listen("tcp", listenAddr)
+	if err != nil {
+		log.Printf("Failed to listen on %s: %v", listenAddr, err)
+		return
+	}
+	defer listener.Close()
+
+	if cfg.NeedsPFRedirect() {
+		log.Printf("Listening on %s (redirected from %s:%d)", listenAddr, cfg.LocalIP, cfg.Port)
+	} else {
+		log.Printf("Listening on %s", listenAddr)
+	}
+
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			log.Printf("Accept error on %s: %v", listenAddr, err)
+			return
+		}
+
+		go df.forwardConnection(conn, cfg)
+	}
+}
+
+// forwardConnection forwards a single connection through SSH
+func (df *DynamicForwarder) forwardConnection(localConn net.Conn, cfg ForwardConfig) {
+	defer localConn.Close()
+
+	sshClient, err := df.sshPool.GetClient(cfg.JumpHost, cfg.JumpPort, cfg.KeyPath, cfg.IdentityAgent)
+	if err != nil {
+		log.Printf("Failed to get SSH client: %v", err)
+		return
+	}
+
+	remoteAddr := fmt.Sprintf("%s:%d", cfg.RemoteHost, cfg.Port)
+	remoteConn, err := sshClient.Dial("tcp", remoteAddr)
+	if err != nil {
+		log.Printf("Connection failed, attempting reconnect: %v", err)
+		df.sshPool.RemoveClient(cfg.JumpHost, cfg.JumpPort)
+
+		sshClient, err = df.sshPool.GetClient(cfg.JumpHost, cfg.JumpPort, cfg.KeyPath, cfg.IdentityAgent)
+		if err != nil {
+			log.Printf("Failed to reconnect: %v", err)
+			return
+		}
+
+		remoteConn, err = sshClient.Dial("tcp", remoteAddr)
+		if err != nil {
+			log.Printf("Failed to dial %s after reconnect: %v", remoteAddr, err)
+			return
+		}
+	}
+	defer remoteConn.Close()
+
+	log.Printf("Forwarding: :%d -> %s", cfg.Port, remoteAddr)
+
+	done := make(chan struct{}, 2)
+
+	go func() {
+		io.Copy(remoteConn, localConn)
+		done <- struct{}{}
+	}()
+
+	go func() {
+		io.Copy(localConn, remoteConn)
+		done <- struct{}{}
+	}()
+
+	<-done
+	log.Printf("Connection closed: :%d", cfg.Port)
 }
