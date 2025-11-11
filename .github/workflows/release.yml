@@ -47,6 +47,9 @@ jobs:
         env:
           GOOS: darwin
           GOARCH: amd64
+          CGO_ENABLED: 1
+          CGO_CFLAGS: -mmacosx-version-min=10.15
+          CGO_LDFLAGS: -mmacosx-version-min=10.15
         run: |
           mkdir -p dist/portsmith-${{ steps.version.outputs.VERSION }}-darwin-amd64
           cd helper && go build -ldflags="-s -w" -o ../dist/portsmith-${{ steps.version.outputs.VERSION }}-darwin-amd64/portsmith-helper
@@ -61,6 +64,9 @@ jobs:
         env:
           GOOS: darwin
           GOARCH: arm64
+          CGO_ENABLED: 1
+          CGO_CFLAGS: -mmacosx-version-min=10.15
+          CGO_LDFLAGS: -mmacosx-version-min=10.15
         run: |
           mkdir -p dist/portsmith-${{ steps.version.outputs.VERSION }}-darwin-arm64
           cd helper && go build -ldflags="-s -w" -o ../dist/portsmith-${{ steps.version.outputs.VERSION }}-darwin-arm64/portsmith-helper
