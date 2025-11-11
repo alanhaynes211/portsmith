@@ -2,8 +2,6 @@
   <img src=".github/logo.svg" alt="Portsmith Logo" width="200">
 </p>
 
-<h1 align="center">Portsmith</h1>
-
 <p align="center">
   A blacksmith for ports: dynamically forges and tears down secure forwards on demand.
 </p>
