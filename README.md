@@ -17,9 +17,8 @@
 
   * **Dynamic Port Forwarding:** Automatically establishes and maintains SSH port forwards through bastion hosts. Connections are established on-demand when traffic is received, minimizing resource usage.
   * **System Tray Application:** Run as a native macOS system tray app with start/stop controls and easy access to logs and configuration.
-  * **Privileged Port Support:** Forward privileged ports (like SSH on port 22) without running as root.
-  * **Automatic Loopback Aliases:** Creates local loopback aliases (e.g., `127.0.0.2`, `127.0.0.3`) for clean service separation.
-  * **Automatic `/etc/hosts` Management:** Assigns custom hostnames (like `service.remote`) to forwarded services.
+  * **Privileged Port Support:** Forward privileged ports (like SSH on port 22).
+  * **Automatic Loopback Aliases:** Creates local loopback aliases (e.g., `127.0.0.2`, `127.0.0.3`) with `/etc/hosts` entries for clean service separation.
   * **Multiple Services:** Define and manage connections for multiple remote services. Forward a single port or entire range.
   * **SSH Agent Integration:** Uses your existing SSH agent for authentication, with support for custom identity agents (e.g., 1Password).
   * **Graceful Cleanup:** Automatically cleans up all resources on exit and removes stale resources on startup.
@@ -91,24 +90,7 @@ The terminal will remain open but logs are redirected to `~/Library/Logs/Portsmi
 
 Portsmith requires access to your SSH keys for authentication. There are several ways to manage this:
 
-**Option 1: macOS Keychain Integration (Recommended for auto-start)**
-
-Store your SSH key passphrase in the macOS keychain so it's automatically available:
-
-```bash
-# Add your key to the SSH agent and store passphrase in keychain
-ssh-add --apple-use-keychain ~/.ssh/id_rsa
-```
-
-Then configure your SSH to always use the keychain by adding to `~/.ssh/config`:
-
-```
-Host *
-  UseKeychain yes
-  AddKeysToAgent yes
-```
-
-**Option 2: Identity Agent (1Password, etc.)**
+**Option 1: Identity Agent (1Password, etc.)**
 
 Use an identity agent like 1Password's SSH agent for seamless authentication:
 
@@ -119,7 +101,7 @@ identity_agent: ~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock
 
 This works great for automatic startup as the agent handles authentication via GUI prompts.
 
-**Option 3: Manual SSH Agent**
+**Option 2: Manual SSH Agent**
 
 If running portsmith manually from a terminal:
 
@@ -131,7 +113,7 @@ ssh-add ~/.ssh/id_rsa
 portsmith
 ```
 
-**Note:** For automatic startup at login (e.g., via launchd), you must use Option 1 or 2, as portsmith cannot prompt for passphrases when running in the background.
+**Note:** For automatic startup at login (e.g., via launchd), use Option 1 if your key has a passphrase, as portsmith cannot prompt for the passphrases when running in the background.
 
 ## 🔍 How It Works
 
