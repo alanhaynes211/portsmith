@@ -45,7 +45,7 @@ func (app *SystrayApp) onReady() {
 	systray.AddSeparator()
 
 	mConfig := systray.AddMenuItem("Open Config", "Open configuration file")
-	app.mViewLogs = systray.AddMenuItem("View Logs", "Open log file")
+	app.mViewLogs = systray.AddMenuItem("Open Log", "Open log file")
 
 	systray.AddSeparator()
 
