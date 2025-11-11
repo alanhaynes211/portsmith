@@ -70,7 +70,7 @@ Once configured, run Portsmith in either system tray mode (default) or CLI mode:
 
 **System Tray Mode (Default)**
 
-Simply run `portsmith` from a terminal. It will automatically daemonize and appear in your macOS menu bar:
+Simply run `portsmith` from a terminal and it will appear in your macOS menu bar:
 
 ```bash
 # Add your SSH key (if not already loaded)
@@ -80,7 +80,7 @@ ssh-add ~/.ssh/id_rsa
 portsmith
 ```
 
-The system tray icon provides controls to start/stop forwarding, open the config file, and view logs.
+The terminal will remain open but logs are redirected to `~/Library/Logs/Portsmith/portsmith.log`. The system tray icon provides controls to start/stop forwarding, open the config file, and view logs.
 
 **CLI Mode**
 

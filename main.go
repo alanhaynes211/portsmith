@@ -35,11 +35,8 @@ func main() {
 		}
 	}
 
-	if !cliMode && !daemonMode {
-		daemonize()
-		return
-	}
-
+	// Note: Systray mode runs in foreground (no daemonization)
+	// The systray library needs GUI access which doesn't work when daemonized
 	if daemonMode {
 		setupDaemonLogging()
 	}
@@ -93,6 +90,10 @@ func runCLIMode(forwarder *DynamicForwarder) {
 
 // runSystrayMode runs portsmith with system tray UI
 func runSystrayMode(forwarder *DynamicForwarder) {
+	fmt.Println("Portsmith starting in system tray...")
+	fmt.Println("Logs: ~/Library/Logs/Portsmith/portsmith.log")
+	// Redirect logs to file for cleaner terminal experience
+	setupDaemonLogging()
 	log.Println("Starting Portsmith in systray mode...")
 	app := NewSystrayApp(forwarder)
 	app.Run()
