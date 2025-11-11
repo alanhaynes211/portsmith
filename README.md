@@ -81,14 +81,57 @@ hosts:
 Once configured, run Portsmith and it will appear in your macOS menu bar:
 
 ```bash
-# Add your SSH key (if not already loaded)
-ssh-add ~/.ssh/id_rsa
-
 # Run Portsmith (launches in system tray)
 portsmith
 ```
 
 The terminal will remain open but logs are redirected to `~/Library/Logs/Portsmith/portsmith.log`. The system tray icon provides controls to start/stop forwarding, open the config file, and view logs. Press `Ctrl+C` in the terminal to gracefully shut down all connections and clean up network settings.
+
+### SSH Key Management
+
+Portsmith requires access to your SSH keys for authentication. There are several ways to manage this:
+
+**Option 1: macOS Keychain Integration (Recommended for auto-start)**
+
+Store your SSH key passphrase in the macOS keychain so it's automatically available:
+
+```bash
+# Add your key to the SSH agent and store passphrase in keychain
+ssh-add --apple-use-keychain ~/.ssh/id_rsa
+```
+
+Then configure your SSH to always use the keychain by adding to `~/.ssh/config`:
+
+```
+Host *
+  UseKeychain yes
+  AddKeysToAgent yes
+```
+
+**Option 2: Identity Agent (1Password, etc.)**
+
+Use an identity agent like 1Password's SSH agent for seamless authentication:
+
+```yaml
+# In your config.yaml
+identity_agent: ~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock
+```
+
+This works great for automatic startup as the agent handles authentication via GUI prompts.
+
+**Option 3: Manual SSH Agent**
+
+If running portsmith manually from a terminal:
+
+```bash
+# Add your SSH key to the agent
+ssh-add ~/.ssh/id_rsa
+
+# Then run portsmith
+portsmith
+```
+
+**Note:** For automatic startup at login (e.g., via launchd), you must use Option 1 or 2, as portsmith cannot prompt for passphrases when running in the background.
 
 ## 🔍 How It Works
 
