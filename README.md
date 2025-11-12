@@ -64,15 +64,15 @@ just build-install
 
 Portsmith is configured using a YAML file located at `~/.config/portsmith/config.yaml`, which will be created during the installation. Below is a minimal example.
 
-```
+```yaml
 hosts:
   - local_ip: 127.0.0.2
-    hostnames:
-      - myapp.local
     remote_host: app.internal.example.com
     jump_host: bastion.example.com
     ports: [80, "8443-8444"]
 ```
+
+**Note:** When `remote_host` is a domain name (not an IP address), `hostnames` automatically defaults to the value of `remote_host`. In the example above, Portsmith will create an `/etc/hosts` entry mapping `127.0.0.2` to `app.internal.example.com`. You can override this by explicitly specifying `hostnames` if you prefer different local names.
 
 
 ### Run

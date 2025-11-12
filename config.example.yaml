@@ -1,13 +1,11 @@
 hosts:
-  # Simple example - minimal configuration with defaults
+  # Simple example - minimal configuration with defaults - access using app.internal.example.com
   - local_ip: 127.0.0.2
-    hostnames:
-      - myapp.local
     remote_host: app.internal.example.com
     jump_host: bastion.example.com
     ports: [80, 443]
 
-  # Full example - all options specified
+  # Full example - all options specified - access using db.local or database.local
   - local_ip: 127.0.0.3
     hostnames:
       - db.local

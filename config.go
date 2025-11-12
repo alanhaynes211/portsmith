@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"log"
+	"net"
 	"os"
 
 	"gopkg.in/yaml.v3"
@@ -67,6 +69,11 @@ func (fc ForwardConfig) NeedsPFRedirect() bool {
 	return fc.Port != fc.ListenPort
 }
 
+// isIPAddress returns true if the string is a valid IP address
+func isIPAddress(s string) bool {
+	return net.ParseIP(s) != nil
+}
+
 // LoadConfig reads and parses a YAML configuration file
 func LoadConfig(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
@@ -86,6 +93,15 @@ func LoadConfig(path string) (*Config, error) {
 		}
 		if config.Hosts[i].KeyPath == "" {
 			config.Hosts[i].KeyPath = DefaultKeyPath
+		}
+		// Default hostnames to remote_host if remote_host is a domain name (not an IP)
+		if len(config.Hosts[i].Hostnames) == 0 {
+			if isIPAddress(config.Hosts[i].RemoteHost) {
+				log.Printf("Warning: Host with remote_host=%s has no hostnames. Access via local IP %s only.",
+					config.Hosts[i].RemoteHost, config.Hosts[i].LocalIP)
+			} else {
+				config.Hosts[i].Hostnames = []string{config.Hosts[i].RemoteHost}
+			}
 		}
 	}
 

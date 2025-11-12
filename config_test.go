@@ -233,3 +233,98 @@ func TestLoadConfigDefaults(t *testing.T) {
 		t.Errorf("KeyPath = %s, want %s (default)", host.KeyPath, DefaultKeyPath)
 	}
 }
+
+func TestLoadConfigHostnameDefaulting(t *testing.T) {
+	tests := []struct {
+		name             string
+		configContent    string
+		expectedHostname string
+		wantDefault      bool
+	}{
+		{
+			name: "defaults to remote_host when domain name",
+			configContent: `hosts:
+  - local_ip: 127.0.0.2
+    remote_host: app.internal.example.com
+    jump_host: bastion.example.com
+`,
+			expectedHostname: "app.internal.example.com",
+			wantDefault:      true,
+		},
+		{
+			name: "no default when remote_host is IPv4",
+			configContent: `hosts:
+  - local_ip: 127.0.0.2
+    remote_host: 10.0.1.5
+    jump_host: bastion.example.com
+`,
+			expectedHostname: "",
+			wantDefault:      false,
+		},
+		{
+			name: "preserves explicit hostnames",
+			configContent: `hosts:
+  - local_ip: 127.0.0.2
+    hostnames:
+      - custom.local
+    remote_host: app.internal.example.com
+    jump_host: bastion.example.com
+`,
+			expectedHostname: "custom.local",
+			wantDefault:      false,
+		},
+		{
+			name: "no default when remote_host is IPv6",
+			configContent: `hosts:
+  - local_ip: 127.0.0.2
+    remote_host: "2001:db8::1"
+    jump_host: bastion.example.com
+`,
+			expectedHostname: "",
+			wantDefault:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpFile, err := os.CreateTemp("", "portsmith-test-hostname-*.yaml")
+			if err != nil {
+				t.Fatalf("Failed to create temp file: %v", err)
+			}
+			defer os.Remove(tmpFile.Name())
+
+			if _, err := tmpFile.Write([]byte(tt.configContent)); err != nil {
+				t.Fatalf("Failed to write temp file: %v", err)
+			}
+			tmpFile.Close()
+
+			config, err := LoadConfig(tmpFile.Name())
+			if err != nil {
+				t.Fatalf("LoadConfig() error = %v", err)
+			}
+
+			if len(config.Hosts) != 1 {
+				t.Fatalf("Expected 1 host, got %d", len(config.Hosts))
+			}
+
+			host := config.Hosts[0]
+
+			if tt.wantDefault {
+				if len(host.Hostnames) != 1 {
+					t.Errorf("Expected 1 hostname (defaulted), got %d", len(host.Hostnames))
+				} else if host.Hostnames[0] != tt.expectedHostname {
+					t.Errorf("Hostname = %s, want %s", host.Hostnames[0], tt.expectedHostname)
+				}
+			} else if tt.expectedHostname == "" {
+				if len(host.Hostnames) != 0 {
+					t.Errorf("Expected 0 hostnames for IP address, got %d: %v", len(host.Hostnames), host.Hostnames)
+				}
+			} else {
+				// Explicit hostnames case
+				if len(host.Hostnames) != 1 || host.Hostnames[0] != tt.expectedHostname {
+					t.Errorf("Hostnames = %v, want [%s]", host.Hostnames, tt.expectedHostname)
+				}
+			}
+		})
+	}
+}
