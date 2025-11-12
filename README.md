@@ -15,7 +15,7 @@
 
 ## ✨ Features
 
-  * **Dynamic Port Forwarding:** Automatically establishes and maintains SSH port forwards through bastion hosts. Connections are established on-demand when traffic is received, minimizing resource usage.
+  * **On Demand Port Forwarding:** Automatically establishes and maintains SSH port forwards through bastion hosts. Connections are established on-demand when traffic is received, minimizing resource usage.
   * **System Tray Application:** Run as a native macOS system tray app with start/stop controls and easy access to logs and configuration.
   * **Privileged Port Support:** Forward privileged ports (like SSH on port 22).
   * **Automatic Loopback Aliases:** Creates local loopback aliases (e.g., `127.0.0.2`, `127.0.0.3`) with `/etc/hosts` entries for clean service separation.
