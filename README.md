@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  A blacksmith for ports: dynamically forges and tears down secure forwards on demand.
+  Forges and tears down SSH port forwards on demand.
 </p>
 
 <p align="center">
