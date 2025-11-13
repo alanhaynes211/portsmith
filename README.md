@@ -97,7 +97,25 @@ Press `Ctrl+C` in the terminal to gracefully shut down all connections and clean
 
 Portsmith requires access to your SSH keys for authentication. There are several ways to manage this:
 
-**Option 1: Identity Agent (1Password, etc.)**
+**Option 1: macOS Keychain (Recommended)**
+
+Store your SSH key passphrase in macOS Keychain for automatic loading:
+
+```bash
+# One-time setup: add your key to macOS Keychain
+ssh-add --apple-use-keychain ~/.ssh/id_rsa
+
+# Configure SSH to use keychain (optional, improves compatibility)
+cat >> ~/.ssh/config << 'EOF'
+Host *
+  UseKeychain yes
+  AddKeysToAgent yes
+EOF
+```
+
+Portsmith will automatically load keys from the Keychain when needed. After a reboot, keys are loaded on-demand without prompting.
+
+**Option 2: Identity Agent (1Password, etc.)**
 
 Use an identity agent like 1Password's SSH agent for seamless authentication:
 
@@ -106,9 +124,9 @@ Use an identity agent like 1Password's SSH agent for seamless authentication:
 identity_agent: ~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock
 ```
 
-This works great for automatic startup as the agent handles authentication via GUI prompts.
+The agent handles authentication via GUI prompts or biometric unlock.
 
-**Option 2: Manual SSH Agent**
+**Option 3: Manual SSH Agent**
 
 If running portsmith manually from a terminal:
 
@@ -120,7 +138,7 @@ ssh-add ~/.ssh/id_rsa
 portsmith
 ```
 
-**Note:** For automatic startup at login (e.g., via launchd), use Option 1 if your key has a passphrase, as portsmith cannot prompt for the passphrases when running in the background.
+**Note:** For automatic startup at login, use Option 1 or Option 2. Option 3 requires manual setup after each reboot.
 
 ## 🔍 How It Works
 

@@ -5,6 +5,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/exec"
 	"os/user"
 	"strings"
 	"sync"
@@ -301,6 +302,34 @@ func loadSSHAuthMethods(keyPath, identityAgent string) ([]ssh.AuthMethod, error)
 				return authMethods, nil
 			}
 			agentConn.Close()
+
+			// Agent exists but has no keys - try loading from macOS Keychain
+			// Only do this for system agent (SSH_AUTH_SOCK), not custom identity_agent
+			if identityAgent == "" && keyPath != "" {
+				expandedKeyPath, err := ExpandKeyPath(keyPath)
+				if err == nil {
+					log.Printf("Agent has no keys, attempting to load %s from macOS Keychain", expandedKeyPath)
+					cmd := exec.Command("ssh-add", "--apple-use-keychain", expandedKeyPath)
+					cmd.Stdin = nil
+					if err := cmd.Run(); err == nil {
+						// Retry agent connection after ssh-add
+						agentConn, err := net.Dial("unix", agentSocket)
+						if err == nil {
+							agentClient := agent.NewClient(agentConn)
+							signers, err := agentClient.Signers()
+							if err == nil && len(signers) > 0 {
+								authMethods = append(authMethods, ssh.PublicKeys(signers...))
+								log.Printf("SSH agent loaded with %d key(s) from Keychain", len(signers))
+								authMethods = append(authMethods, ssh.KeyboardInteractive(keyboardInteractiveChallenge))
+								return authMethods, nil
+							}
+							agentConn.Close()
+						}
+					} else {
+						log.Printf("Failed to load key from Keychain: %v", err)
+					}
+				}
+			}
 		} else {
 			log.Printf("Failed to connect to SSH agent at %s: %v", agentSocket, err)
 		}
