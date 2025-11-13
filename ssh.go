@@ -55,6 +55,20 @@ func (pool *SSHClientPool) LoadAuthMethods(keyPath, identityAgent string) error 
 	return nil
 }
 
+// ClearAuthMethods removes cached auth methods when agent connection becomes stale
+func (pool *SSHClientPool) ClearAuthMethods(keyPath, identityAgent string) {
+	pool.authMu.Lock()
+	defer pool.authMu.Unlock()
+
+	cacheKey := keyPath
+	if identityAgent != "" {
+		cacheKey = keyPath + "|" + identityAgent
+	}
+
+	delete(pool.authMethods, cacheKey)
+	log.Printf("Cleared cached auth methods for %s", cacheKey)
+}
+
 // LoadAuthMethodsWithRetry attempts to load SSH auth methods with unlimited retries
 // This is used when waiting for an SSH agent to become available (e.g., at startup)
 func (pool *SSHClientPool) LoadAuthMethodsWithRetry(keyPath, identityAgent string, retryInterval time.Duration) error {
@@ -157,8 +171,6 @@ func (pool *SSHClientPool) GetClient(jumpHost string, jumpPort int, keyPath, ide
 	jumpAddr := fmt.Sprintf("%s:%d", jumpHost, jumpPort)
 
 	// Retry SSH connection with exponential backoff for agent errors
-	// This handles cases where the agent responds but fails during handshake
-	// (e.g., 1Password waiting for Touch ID unlock, agent initialization)
 	var client *ssh.Client
 	maxRetries := 3
 	for attempt := 1; attempt <= maxRetries; attempt++ {
@@ -177,8 +189,26 @@ func (pool *SSHClientPool) GetClient(jumpHost string, jumpPort int, keyPath, ide
 			return nil, fmt.Errorf("failed to dial jump host %s (attempt %d/%d): %w", jumpAddr, attempt, maxRetries, err)
 		}
 
+		// Clear stale auth methods to force reload from agent
+		pool.ClearAuthMethods(keyPath, identityAgent)
+
+		// Reload auth methods with fresh agent connection
+		pool.authMu.Lock()
+		delete(pool.authMethods, cacheKey)
+		pool.authMu.Unlock()
+
+		authMethods, err = loadSSHAuthMethods(keyPath, identityAgent)
+		if err != nil {
+			return nil, fmt.Errorf("failed to reload auth methods: %w", err)
+		}
+
+		pool.authMu.Lock()
+		pool.authMethods[cacheKey] = authMethods
+		sshConfig.Auth = authMethods
+		pool.authMu.Unlock()
+
 		delay := time.Duration(attempt*3) * time.Second
-		log.Printf("SSH connection failed (attempt %d/%d): %v. Agent may need unlock. Retrying in %s...",
+		log.Printf("SSH connection failed (attempt %d/%d): %v. Retrying with fresh agent connection in %s...",
 			attempt, maxRetries, err, delay)
 
 		// Unlock to allow other operations while we wait
