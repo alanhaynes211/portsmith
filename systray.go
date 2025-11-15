@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"time"
 
 	"github.com/getlantern/systray"
 )
@@ -62,6 +63,7 @@ func (app *SystrayApp) onReady() {
 	app.mQuit = systray.AddMenuItem("Quit", "Quit Portsmith")
 
 	go app.handleMenuEvents(mConfig)
+	go app.handleStatusUpdates()
 
 	app.handleStart()
 }
@@ -81,6 +83,22 @@ func (app *SystrayApp) handleMenuEvents(mConfig *systray.MenuItem) {
 			app.handleToggleStartAtLogin()
 		case <-app.mQuit.ClickedCh:
 			systray.Quit()
+		}
+	}
+}
+
+func (app *SystrayApp) handleStatusUpdates() {
+	for update := range app.forwarder.GetStatusChan() {
+		switch update.Health {
+		case StatusHealthy:
+			app.mStatus.SetTitle("Status: Running")
+			systray.SetTooltip(update.Message)
+		case StatusDegraded:
+			app.mStatus.SetTitle("Status: Warning")
+			systray.SetTooltip(update.Message)
+		case StatusError:
+			app.mStatus.SetTitle("Status: Error")
+			systray.SetTooltip(update.Message)
 		}
 	}
 }
@@ -148,7 +166,19 @@ func (app *SystrayApp) handleViewLogs() {
 func (app *SystrayApp) onExit() {
 	if app.forwarder.IsRunning() {
 		log.Println("Systray exiting, stopping forwarder...")
-		app.forwarder.Stop()
+
+		done := make(chan struct{})
+		go func() {
+			app.forwarder.Stop()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+			log.Println("Forwarder stopped cleanly")
+		case <-time.After(3 * time.Second):
+			log.Println("Forwarder stop timed out, forcing exit")
+		}
 	}
 }
 

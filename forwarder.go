@@ -6,16 +6,38 @@ import (
 	"log"
 	"net"
 	"strings"
+	"sync"
+	"time"
 )
+
+// HealthStatus represents the overall health state
+type HealthStatus int
+
+const (
+	StatusHealthy HealthStatus = iota
+	StatusDegraded
+	StatusError
+)
+
+// StatusUpdate contains health status information
+type StatusUpdate struct {
+	Health  HealthStatus
+	Message string
+}
 
 // DynamicForwarder orchestrates the dynamic port forwarding
 type DynamicForwarder struct {
-	configPath string
-	configs    []HostConfig
-	netSetup   *NetworkSetup
-	sshPool    *SSHClientPool
-	cleanup    []func() error
-	running    bool
+	configPath   string
+	configs      []HostConfig
+	netSetup     *NetworkSetup
+	sshPool      *SSHClientPool
+	cleanup      []func() error
+	running      bool
+	statusChan   chan StatusUpdate
+	errorCount   int
+	errorMu      sync.Mutex
+	lastErrors   []string
+	maxErrors    int
 }
 
 // NewDynamicForwarder creates a new dynamic forwarder
@@ -27,17 +49,61 @@ func NewDynamicForwarder(configPath string, configs []HostConfig, helperPath str
 
 	sshPool := NewSSHClientPool()
 
-	// Note: We don't load SSH auth methods here anymore (lazy loading).
-	// Auth methods will be loaded on-demand when the first connection is made.
-	// This allows portsmith to start even if SSH agents aren't ready yet.
-
 	return &DynamicForwarder{
 		configPath: configPath,
 		configs:    configs,
 		netSetup:   netSetup,
 		sshPool:    sshPool,
 		cleanup:    make([]func() error, 0),
+		statusChan: make(chan StatusUpdate, 10),
+		lastErrors: make([]string, 0),
+		maxErrors:  5,
 	}, nil
+}
+
+// GetStatusChan returns the status update channel
+func (df *DynamicForwarder) GetStatusChan() <-chan StatusUpdate {
+	return df.statusChan
+}
+
+// recordError tracks connection errors and updates health status
+func (df *DynamicForwarder) recordError(err error) {
+	df.errorMu.Lock()
+	defer df.errorMu.Unlock()
+
+	errMsg := fmt.Sprintf("%s: %v", time.Now().Format("15:04:05"), err)
+	df.lastErrors = append(df.lastErrors, errMsg)
+	if len(df.lastErrors) > df.maxErrors {
+		df.lastErrors = df.lastErrors[1:]
+	}
+	df.errorCount++
+
+	select {
+	case df.statusChan <- StatusUpdate{
+		Health:  StatusDegraded,
+		Message: fmt.Sprintf("%d connection errors - %v", df.errorCount, err),
+	}:
+	default:
+	}
+}
+
+// clearErrors resets error tracking
+func (df *DynamicForwarder) clearErrors() {
+	df.errorMu.Lock()
+	defer df.errorMu.Unlock()
+
+	df.errorCount = 0
+	df.lastErrors = make([]string, 0)
+}
+
+// GetLastErrors returns recent error messages
+func (df *DynamicForwarder) GetLastErrors() []string {
+	df.errorMu.Lock()
+	defer df.errorMu.Unlock()
+
+	errors := make([]string, len(df.lastErrors))
+	copy(errors, df.lastErrors)
+	return errors
 }
 
 // reloadConfig re-reads the configuration file and updates internal state
@@ -121,6 +187,16 @@ func (df *DynamicForwarder) Start() error {
 	}
 
 	df.running = true
+	df.clearErrors()
+
+	select {
+	case df.statusChan <- StatusUpdate{
+		Health:  StatusHealthy,
+		Message: "Port forwarding started",
+	}:
+	default:
+	}
+
 	log.Printf("Port forwarding started")
 	return nil
 }
@@ -143,6 +219,7 @@ func (df *DynamicForwarder) IsRunning() bool {
 
 // Close shuts down the forwarder and cleans up resources
 func (df *DynamicForwarder) Close() error {
+	close(df.statusChan)
 	df.sshPool.Close()
 
 	for i := len(df.cleanup) - 1; i >= 0; i-- {
@@ -188,6 +265,7 @@ func (df *DynamicForwarder) forwardConnection(localConn net.Conn, cfg ForwardCon
 	sshClient, err := df.sshPool.GetClient(cfg.JumpHost, cfg.JumpPort, cfg.KeyPath, cfg.IdentityAgent)
 	if err != nil {
 		log.Printf("Failed to get SSH client: %v", err)
+		df.recordError(fmt.Errorf("SSH client error for %s: %w", cfg.JumpHost, err))
 		return
 	}
 
@@ -200,12 +278,14 @@ func (df *DynamicForwarder) forwardConnection(localConn net.Conn, cfg ForwardCon
 		sshClient, err = df.sshPool.GetClient(cfg.JumpHost, cfg.JumpPort, cfg.KeyPath, cfg.IdentityAgent)
 		if err != nil {
 			log.Printf("Failed to reconnect: %v", err)
+			df.recordError(fmt.Errorf("reconnect failed for %s: %w", cfg.JumpHost, err))
 			return
 		}
 
 		remoteConn, err = sshClient.Dial("tcp", remoteAddr)
 		if err != nil {
 			log.Printf("Failed to dial %s after reconnect: %v", remoteAddr, err)
+			df.recordError(fmt.Errorf("dial failed for %s: %w", remoteAddr, err))
 			return
 		}
 	}
