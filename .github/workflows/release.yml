@@ -7,8 +7,8 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to release (e.g., v1.0.0)'
-        required: true
+        description: 'Version to release (e.g., v1.0.0, leave empty to auto-increment patch)'
+        required: false
         type: string
       body:
         description: 'Release notes (optional, will auto-generate if empty)'
@@ -39,8 +39,17 @@ jobs:
         run: |
           if [ -n "${{ inputs.version }}" ]; then
             echo "VERSION=${{ inputs.version }}" >> $GITHUB_OUTPUT
-          else
+          elif [ -n "${GITHUB_REF#refs/tags/}" ] && [ "${GITHUB_REF#refs/tags/}" != "$GITHUB_REF" ]; then
             echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          else
+            LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+            echo "Latest tag: $LATEST_TAG"
+            VERSION=${LATEST_TAG#v}
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+            PATCH=$((PATCH + 1))
+            NEW_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
+            echo "Auto-incremented version: $NEW_VERSION"
+            echo "VERSION=$NEW_VERSION" >> $GITHUB_OUTPUT
           fi
 
       - name: Build for macOS amd64
@@ -87,36 +96,26 @@ jobs:
         id: release_notes
         run: |
           if [ -n "${{ inputs.body }}" ]; then
-            cat << 'EOF' > release_notes.md
-          ${{ inputs.body }}
-
-          ## Installation
-
-          ```bash
-          curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | bash
-          ```
-
-          Or download the appropriate binary for your platform below.
-
-          ### Platforms
-          - `darwin-amd64`: macOS Intel
-          - `darwin-arm64`: macOS Apple Silicon
-          EOF
+            RELEASE_BODY="${{ inputs.body }}"
           else
-            cat << 'EOF' > release_notes.md
+            RELEASE_BODY=$(git log -1 --pretty=%B)
+          fi
+
+          cat << EOF > release_notes.md
+          $RELEASE_BODY
+
           ## Installation
 
-          ```bash
+          \`\`\`bash
           curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | bash
-          ```
+          \`\`\`
 
           Or download the appropriate binary for your platform below.
 
           ### Platforms
-          - `darwin-amd64`: macOS Intel
-          - `darwin-arm64`: macOS Apple Silicon
+          - \`darwin-amd64\`: macOS Intel
+          - \`darwin-arm64\`: macOS Apple Silicon
           EOF
-          fi
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
