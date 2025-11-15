@@ -84,7 +84,12 @@ Once configured, run Portsmith and it will appear in your macOS menu bar:
 nohup portsmith &
 ```
 
-The terminal will remain open but logs are redirected to `~/Library/Logs/Portsmith/portsmith.log`. The system tray icon provides controls to:
+The terminal will remain open but logs are redirected to `~/Library/Logs/Portsmith/portsmith.log`.
+
+Click the menu bar icon to access controls:
+
+<img src=".github/systray.png" alt="System Tray Menu" width="160" align="right">
+
 - Start/stop forwarding
 - Open the config file
 - View logs
