@@ -13,7 +13,7 @@
   <a href="#-how-it-works">How It Works</a>
 </p>
 
-## ✨ Features
+## Features
 
   * **On Demand Port Forwarding:** Automatically establishes and maintains SSH port forwards through bastion hosts. Connections are established on-demand when traffic is received, minimizing resource usage.
   * **System Tray Application:** Run as a native macOS system tray app with start/stop controls and easy access to logs and configuration.
@@ -23,7 +23,7 @@
   * **SSH Agent Integration:** Uses your existing SSH agent for authentication, with support for custom identity agents (e.g., 1Password).
   * **Graceful Cleanup:** Automatically cleans up all resources on exit and removes stale resources on startup.
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Installation
 
@@ -40,7 +40,7 @@ This will automatically:
 - Download the latest release
 - Install binaries to `/usr/local/bin`
 - Configure sudoers for passwordless helper execution
-- Set up the example config at `~/.config/portsmith/config.yaml`
+- Copy the example config to `~/.config/portsmith/config.yaml`
 
 #### Build from Source
 
@@ -81,7 +81,7 @@ Once configured, run Portsmith and it will appear in your macOS menu bar:
 
 ```bash
 # Run Portsmith (launches in system tray)
-portsmith
+nohup portsmith &
 ```
 
 The terminal will remain open but logs are redirected to `~/Library/Logs/Portsmith/portsmith.log`. The system tray icon provides controls to:
@@ -140,7 +140,7 @@ portsmith
 
 **Note:** For automatic startup at login, use Option 1 or Option 2. Option 3 requires manual setup after each reboot.
 
-## 🔍 How It Works
+## How It Works
 
 ### 1. Loopback Interface Aliases
 
@@ -213,6 +213,6 @@ When Portsmith exits (via `Ctrl+C` or the system tray "Stop" action), it automat
 
 On startup, Portsmith also cleans up any stale resources from previous runs that didn't shut down cleanly.
 
-## ⚖️ License
+## License
 
 This project is licensed under the MIT License.
