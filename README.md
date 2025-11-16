@@ -141,7 +141,7 @@ If running portsmith manually from a terminal:
 ssh-add ~/.ssh/id_rsa
 
 # Then run portsmith
-portsmith
+nohup portsmith &
 ```
 
 **Note:** For automatic startup at login, use Option 1 or Option 2. Option 3 requires manual setup after each reboot.
