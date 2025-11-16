@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  Forges and tears down SSH port forwards on demand.
+  SSH port forwarding with automatic hostname management and port range support.
 </p>
 
 <p align="center">
@@ -15,13 +15,14 @@
 
 ## Features
 
-  * **On Demand Port Forwarding:** Automatically establishes and maintains SSH port forwards through bastion hosts. Connections are established on-demand when traffic is received, minimizing resource usage.
-  * **System Tray Application:** Run as a native macOS system tray app with start/stop controls and easy access to logs and configuration.
-  * **Privileged Port Support:** Forward privileged ports (like SSH on port 22).
-  * **Automatic Loopback Aliases:** Creates local loopback aliases (e.g., `127.0.0.2`, `127.0.0.3`) with `/etc/hosts` entries for clean service separation.
-  * **Multiple Services:** Define and manage connections for multiple remote services. Forward a single port or entire range.
-  * **SSH Agent Integration:** Uses your existing SSH agent for authentication, with support for custom identity agents (e.g., 1Password).
-  * **Graceful Cleanup:** Automatically cleans up all resources on exit and removes stale resources on startup.
+  * **Port Range Forwarding:** Forward entire port ranges with a single configuration entry (e.g., `"8000-8100"` forwards 101 ports). Perfect for microservices and development environments.
+  * **Automatic Hostname Management:** Automatically creates `/etc/hosts` entries using your remote host's FQDN - no manual hostname configuration needed. Access `app.internal.example.com` directly from your local machine.
+  * **Privileged Port Support:** Forward privileged ports (like SSH on port 22) without running as root, using macOS packet filter (pf) redirects.
+  * **Automatic Loopback Aliases:** Creates dedicated loopback IPs (e.g., `127.0.0.2`, `127.0.0.3`) for each service, providing clean network separation.
+  * **System Tray Application:** Native macOS menu bar app with start/stop controls, configuration access, and log viewing.
+  * **On Demand Connections:** SSH tunnels establish automatically when traffic arrives and tear down when idle, minimizing resource usage.
+  * **SSH Agent Integration:** Works seamlessly with macOS Keychain, 1Password SSH agent, or any standard SSH agent.
+  * **Graceful Cleanup:** Automatically cleans up all network configurations on exit and removes stale resources on startup.
 
 ## Getting Started
 
