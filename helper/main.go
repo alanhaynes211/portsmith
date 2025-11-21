@@ -11,6 +11,8 @@ import (
 
 const (
 	hostsMarker = "# portsmith-dynamic-forward"
+	stateDir    = "/var/run/portsmith"
+	aliasesFile = "/var/run/portsmith/aliases"
 )
 
 var (
@@ -29,7 +31,6 @@ func validateIP(ip string) error {
 	if parsed == nil {
 		return fmt.Errorf("invalid IP address: %s", ip)
 	}
-	// Only allow loopback addresses for security
 	if !parsed.IsLoopback() {
 		return fmt.Errorf("only loopback addresses allowed: %s", ip)
 	}
@@ -48,6 +49,81 @@ func validateHostname(hostname string) error {
 		return fmt.Errorf("hostname cannot be empty")
 	}
 	return nil
+}
+
+func ensureStateDir() error {
+	return os.MkdirAll(stateDir, 0755)
+}
+
+func addAliasToState(ip string) error {
+	if err := ensureStateDir(); err != nil {
+		return err
+	}
+
+	aliases, err := loadAliases()
+	if err != nil {
+		return err
+	}
+
+	for _, existing := range aliases {
+		if existing == ip {
+			return nil
+		}
+	}
+
+	f, err := os.OpenFile(aliasesFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to open state file: %v", err)
+	}
+	defer f.Close()
+
+	if _, err := f.WriteString(ip + "\n"); err != nil {
+		return fmt.Errorf("failed to write to state file: %v", err)
+	}
+
+	return nil
+}
+
+func removeAliasFromState(ip string) error {
+	aliases, err := loadAliases()
+	if err != nil {
+		return err
+	}
+
+	var newAliases []string
+	for _, existing := range aliases {
+		if existing != ip {
+			newAliases = append(newAliases, existing)
+		}
+	}
+
+	content := strings.Join(newAliases, "\n")
+	if len(newAliases) > 0 {
+		content += "\n"
+	}
+
+	return os.WriteFile(aliasesFile, []byte(content), 0644)
+}
+
+func loadAliases() ([]string, error) {
+	content, err := os.ReadFile(aliasesFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []string{}, nil
+		}
+		return nil, fmt.Errorf("failed to read state file: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
+	var aliases []string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			aliases = append(aliases, line)
+		}
+	}
+
+	return aliases, nil
 }
 
 func addAlias(ip string) error {
@@ -71,6 +147,9 @@ func addAliasDarwin(ip string) error {
 
 	if strings.Contains(string(output), ip) {
 		fmt.Printf("Loopback alias %s already exists\n", ip)
+		if err := addAliasToState(ip); err != nil {
+			return fmt.Errorf("failed to track alias in state: %v", err)
+		}
 		return nil
 	}
 
@@ -78,6 +157,10 @@ func addAliasDarwin(ip string) error {
 	cmd = exec.Command("ifconfig", "lo0", "alias", ip, "up")
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to add loopback alias: %v", err)
+	}
+
+	if err := addAliasToState(ip); err != nil {
+		return fmt.Errorf("failed to track alias in state: %v", err)
 	}
 
 	fmt.Printf("Added loopback alias: %s\n", ip)
@@ -101,6 +184,11 @@ func removeAliasDarwin(ip string) error {
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to remove loopback alias: %v", err)
 	}
+
+	if err := removeAliasFromState(ip); err != nil {
+		return fmt.Errorf("failed to remove alias from state: %v", err)
+	}
+
 	fmt.Printf("Removed loopback alias: %s\n", ip)
 	return nil
 }
@@ -223,51 +311,33 @@ func removeAliases() error {
 }
 
 func removeAliasesDarwin() error {
-	// Get current lo0 configuration
-	cmd := exec.Command("ifconfig", "lo0")
-	output, err := cmd.Output()
+	aliases, err := loadAliases()
 	if err != nil {
-		return fmt.Errorf("failed to check lo0: %v", err)
+		return fmt.Errorf("failed to load aliases state: %v", err)
 	}
 
-	lines := strings.Split(string(output), "\n")
+	if len(aliases) == 0 {
+		fmt.Println("No portsmith aliases to remove")
+		return nil
+	}
+
 	removed := 0
-
-	// Parse ifconfig output and find inet addresses
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "inet ") {
+	for _, ip := range aliases {
+		cmd := exec.Command("ifconfig", "lo0", "-alias", ip)
+		if err := cmd.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to remove alias %s: %v\n", ip, err)
 			continue
 		}
-
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
-		}
-
-		ip := fields[1]
-		// Skip localhost
-		if ip == "127.0.0.1" {
-			continue
-		}
-
-		// Only remove 127.0.0.x aliases
-		if strings.HasPrefix(ip, "127.0.0.") {
-			cmd := exec.Command("ifconfig", "lo0", "-alias", ip)
-			if err := cmd.Run(); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to remove alias %s: %v\n", ip, err)
-				continue
-			}
-			fmt.Printf("Removed loopback alias: %s\n", ip)
-			removed++
-		}
+		fmt.Printf("Removed loopback alias: %s\n", ip)
+		removed++
 	}
 
-	if removed == 0 {
-		fmt.Println("No loopback aliases to remove")
-	} else {
-		fmt.Printf("Removed %d loopback aliases\n", removed)
+	// Clear the state file
+	if err := os.WriteFile(aliasesFile, []byte{}, 0644); err != nil {
+		return fmt.Errorf("failed to clear state file: %v", err)
 	}
+
+	fmt.Printf("Removed %d portsmith aliases\n", removed)
 	return nil
 }
 
@@ -448,7 +518,7 @@ func printUsage() {
 Usage:
   portsmith-helper add-alias <ip>                      Add loopback alias
   portsmith-helper remove-alias <ip>                   Remove specific loopback alias
-  portsmith-helper remove-aliases                      Remove all 127.0.0.x aliases (except 127.0.0.1)
+  portsmith-helper remove-aliases                      Remove all portsmith-managed aliases
   portsmith-helper add-host <ip> <hostname>            Add /etc/hosts entry
   portsmith-helper remove-host <ip> <hostname>         Remove specific /etc/hosts entry
   portsmith-helper remove-hosts                        Remove all portsmith /etc/hosts entries
