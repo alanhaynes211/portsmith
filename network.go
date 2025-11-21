@@ -116,14 +116,24 @@ func (ns *NetworkSetup) Cleanup() error {
 func (ns *NetworkSetup) SetupNetwork(configs []HostConfig) ([]func() error, error) {
 	cleanups := make([]func() error, 0)
 
+	// Collect unique IPs to avoid duplicate alias creation
+	uniqueIPs := make(map[string]bool)
 	for _, cfg := range configs {
-		cleanup, err := ns.SetupLoopbackAlias(cfg.LocalIP)
+		uniqueIPs[cfg.LocalIP] = true
+	}
+
+	// Create alias once per unique IP
+	for ip := range uniqueIPs {
+		cleanup, err := ns.SetupLoopbackAlias(ip)
 		if err != nil {
-			return cleanups, fmt.Errorf("failed to setup loopback for %s: %w", cfg.LocalIP, err)
+			return cleanups, fmt.Errorf("failed to setup loopback for %s: %w", ip, err)
 		}
 		cleanups = append(cleanups, cleanup)
+	}
 
-		cleanup, err = ns.AddHostsEntries(cfg.LocalIP, cfg.Hostnames)
+	// Add hosts entries for each config (can have multiple hostnames per IP)
+	for _, cfg := range configs {
+		cleanup, err := ns.AddHostsEntries(cfg.LocalIP, cfg.Hostnames)
 		if err != nil {
 			return cleanups, fmt.Errorf("failed to setup hosts entries for %s: %w", cfg.LocalIP, err)
 		}

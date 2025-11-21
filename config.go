@@ -105,7 +105,36 @@ func LoadConfig(path string) (*Config, error) {
 		}
 	}
 
+	// Validate no port conflicts on same IP
+	if err := validatePortConflicts(&config); err != nil {
+		return nil, err
+	}
+
 	return &config, nil
+}
+
+// validatePortConflicts checks for port conflicts across hosts sharing the same local_ip
+func validatePortConflicts(config *Config) error {
+	// Map of "ip:port" -> remote_host for error messages
+	portMap := make(map[string]string)
+
+	for _, host := range config.Hosts {
+		ports, err := ExpandPorts(host)
+		if err != nil {
+			return err
+		}
+
+		for _, port := range ports {
+			key := fmt.Sprintf("%s:%d", host.LocalIP, port)
+			if existingHost, exists := portMap[key]; exists {
+				return fmt.Errorf("port conflict: %s is used by both %s and %s",
+					key, existingHost, host.RemoteHost)
+			}
+			portMap[key] = host.RemoteHost
+		}
+	}
+
+	return nil
 }
 
 // FindConfigPath searches for a config file in:

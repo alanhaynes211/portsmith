@@ -75,6 +75,33 @@ hosts:
 
 **Note:** When `remote_host` is a domain name (not an IP address), `hostnames` automatically defaults to the value of `remote_host`. In the example above, Portsmith will create an `/etc/hosts` entry mapping `127.0.0.2` to `app.internal.example.com`. You can override this by explicitly specifying `hostnames` if you prefer different local names.
 
+### Docker Container Access
+
+To access forwarded services from Docker containers, use `127.0.0.1` with unique ports for each service:
+
+```yaml
+hosts:
+  # Database - accessible via host.docker.internal:5432
+  - local_ip: 127.0.0.1
+    remote_host: db.internal.example.com
+    jump_host: bastion.example.com
+    ports: [5432]
+
+  # API - accessible via host.docker.internal:8080
+  - local_ip: 127.0.0.1
+    remote_host: api.internal.example.com
+    jump_host: bastion.example.com
+    ports: [8080]
+```
+
+**From Docker containers:**
+
+```bash
+docker run -it postgres psql -h host.docker.internal -p 5432 -U user dbname
+docker run -it curlimages/curl curl http://host.docker.internal:8080
+```
+
+**Note:** Docker Desktop for Mac only allows containers to access the host's `127.0.0.1` address via `host.docker.internal`. Multiple services can share `127.0.0.1` as long as ports are unique.
 
 ### Run
 
