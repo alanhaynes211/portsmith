@@ -323,6 +323,11 @@ func removeAliasesDarwin() error {
 
 	removed := 0
 	for _, ip := range aliases {
+		// Never remove localhost
+		if ip == "127.0.0.1" || ip == "::1" {
+			continue
+		}
+
 		cmd := exec.Command("ifconfig", "lo0", "-alias", ip)
 		if err := cmd.Run(); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to remove alias %s: %v\n", ip, err)
