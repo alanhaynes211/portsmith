@@ -391,22 +391,45 @@ func addPFRedirect(ip string, fromPort, toPort int) error {
 	}
 
 	needsReload := false
-	if !strings.Contains(string(pfConfContent), "rdr-anchor \"portsmith\"") {
-		// Add anchor reference to pf.conf
-		lines := strings.Split(string(pfConfContent), "\n")
+	pfConfStr := string(pfConfContent)
+	// Check if there's already a pass rule for lo0
+	hasPassLo0 := false
+	for _, line := range strings.Split(pfConfStr, "\n") {
+		if strings.Contains(line, "pass") && strings.Contains(line, "lo0") {
+			hasPassLo0 = true
+			break
+		}
+	}
+	needsPassRule := !hasPassLo0
+	needsAnchor := !strings.Contains(pfConfStr, "rdr-anchor \"portsmith\"")
+
+	if needsPassRule || needsAnchor {
+		// Add missing rules to pf.conf
+		lines := strings.Split(pfConfStr, "\n")
 		var newLines []string
+		passRuleAdded := false
 		anchorAdded := false
 
 		for _, line := range lines {
 			newLines = append(newLines, line)
+
+			// Add pass rule for lo0 after dummynet-anchor but before regular anchor
+			if !passRuleAdded && needsPassRule && strings.HasPrefix(line, "dummynet-anchor") {
+				newLines = append(newLines, "pass quick on lo0 all")
+				passRuleAdded = true
+			}
+
 			// Add rdr-anchor after the com.apple rdr-anchor
-			if strings.Contains(line, "rdr-anchor \"com.apple/*\"") && !anchorAdded {
+			if strings.Contains(line, "rdr-anchor \"com.apple/*\"") && !anchorAdded && needsAnchor {
 				newLines = append(newLines, "rdr-anchor \"portsmith\"")
 				anchorAdded = true
 			}
 		}
 
-		if !anchorAdded {
+		if needsPassRule && !passRuleAdded {
+			return fmt.Errorf("could not find appropriate location in /etc/pf.conf to add pass rule")
+		}
+		if needsAnchor && !anchorAdded {
 			return fmt.Errorf("could not find appropriate location in /etc/pf.conf to add anchor")
 		}
 
@@ -415,6 +438,9 @@ func addPFRedirect(ip string, fromPort, toPort int) error {
 			return fmt.Errorf("failed to update /etc/pf.conf: %v", err)
 		}
 		needsReload = true
+		if needsPassRule {
+			fmt.Println("Added pass rule for lo0 to /etc/pf.conf")
+		}
 	}
 
 	// Load the anchor

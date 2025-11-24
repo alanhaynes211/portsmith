@@ -122,8 +122,11 @@ func (ns *NetworkSetup) SetupNetwork(configs []HostConfig) ([]func() error, erro
 		uniqueIPs[cfg.LocalIP] = true
 	}
 
-	// Create alias once per unique IP
+	// Create alias once per unique IP (skip 127.0.0.1 and ::1 as they already exist)
 	for ip := range uniqueIPs {
+		if ip == "127.0.0.1" || ip == "::1" {
+			continue
+		}
 		cleanup, err := ns.SetupLoopbackAlias(ip)
 		if err != nil {
 			return cleanups, fmt.Errorf("failed to setup loopback for %s: %w", ip, err)
